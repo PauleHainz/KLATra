@@ -1,0 +1,53 @@
+! Verzeichnisse immer mit / am Ende angeben. Dateien ohne / am Anfang angeben.
+! alle Dateien/Verzeichnisse werden relativ zu directory interpretiert.
+! Wo ein Standardwert vorhanden ist, steht dieser,
+! wo kein Standardwert im Programm vorhanden ist, steht ! kSW
+
+&input
+    directory = '/home/paula/Dokumente/Uni/BA/Paula/KLAM_21/Freiburg-0/' ! kSW      ! Verzeichnis, von dem aus im in_file Dateien/Verzeichnisse
+                                                 ! angegeben werden (als string mit "/" am Ende)
+    in_file = 'input/Freiburg.in'     ! kSW      ! KLAM_21 namelist der Simulation, für die Trajektorien
+                                                 ! berechnet werden sollen (als string ohne "/" am Anfang)
+    koord_system = 'EPSG:25832'       ! kSW      ! EPSG-Code des Koordinatensystems, um es in Header der Outputdateien
+                                                 ! zu schreiben bzw. für richtige Positionierung für GeoJSON (als string)
+    Ueberwaermungsgebiete = "Freiburg_Stadtteile.geojson" ! GeoJSON-Datei mit Überwärmungsgebieten als Polygonen; muss im directory liegen oder als kompletter Pfad angegeben werden
+    name_waerme = name ! Attribut, dessen Wert gespeichert werden soll für die Identifikation der Überwärmungsgebiete
+    Quellgebiete =  "Quellgebiete.geojson"       ! GeoJSON-Datei mit Kaltluftenstehungsgebieten bzw. Gebieten, aus denen Schadstoffe in die Überwärmungsgebiete kämen, als Polygone
+    name_quell = QG_kurz ! Attribut, dessen Wert gespeichert werden soll für die Identifikation der Quellgebiete
+/
+
+&trajektorien
+    art = 'Landuse'                  ! kSW    ! 'Rechteck', 'Rechteckrand', 'Landuse', 'Landuse_Bereich',
+                                                   ! 'Landuse_Poly', 'Polygon' oder 'Einzel'
+    x_koord = 402584, 402984 !, 402584, 402984
+    y_koord = 5313133, 5313533 !, 5313133, 5313533,
+    start =   21600                 ! kSW    ! Einzelwert oder kommagetrennt
+    end =     0                     ! kSW    ! Einzelwert oder kommagetrennt
+    windfeld = 'q'                                 ! 'q' für gemitteltes Windfeld, 'z' für die selbst bestimmbare Höhe
+    traj_start_dichte = 0.02 !, 0.0005 !,0.0003,     ! kSW    ! Einzelwert oder kommagetrennt; wenn nicht angegeben eine pro Gitterzelle
+                                                   ! (bei 'Rechteckrand' und 'Einzel' nicht genutzt)
+    landuse = 1                   ! kSW    ! Landuseklasse wie in KLAM_21 benannt
+                                                   ! (wenn 'Landuse', 'Landuse_Poly' oder 'Landuse_Bereich')
+    zeitschritt = 1                                ! Berechnungszeitschritt in Sekunden, falls zs = 'fest'
+    zs = 'klam'                                    ! 'klam' oder 'fest'
+    lu_file = "input/testout.geojson"              ! Vektorisierte Landnutzungsdatei (als geojson), wird für alle Landnutzungsklassen basierten Startpunktberechnungen benötigt.
+    !windspeed_treshold = 0                         ! Standard = 0.2 m s⁻¹, setzt man es auf 0, werden keine Trajektorien abgeschnitten.
+    treshold = 300                                   ! Standard = 5 Zeitschritte 
+/
+
+&output
+    format = 'KLAM', 'geojson'                         ! 'KLAM' und/oder 'geojson'(als string)
+    dt = 300                                ! Wie häufig sollen Koordinaten gespeichert werden? (in Sekunden)
+    out_dir = 'KLATra/'    ! kSW      ! In welchem Verzeichnis soll der Output gespeichert werden?
+                                            ! (als string ohne "/" am Anfang mit "/" am Ende)
+    out_file = 'KLATRAout_2c_'                   ! Name der output Dateien (als string ohne "/" am Anfang), sollte mit _ enden, da dann in dem Format [start]_[end](_[LU]) der ganze Name generiert wird.
+    out_ext = '.out'                        ! (wenn 'KLAM' gewählt) Endung der output Dateien
+    farbverlauf_mit_zeit = .true.           ! (wenn 'KLAM' gewählt) Sollen für KLAM_21 Farbverläufe eingebaut werden?
+                                            ! (.true. oder .false.)
+    strichdicke = 0.5                       ! (wenn 'KLAM' gewählt) Strichdicke für pl_datei
+    farbe = 180, 170                        ! (wenn 'KLAM' gewählt) Farben für die Trajektoriendarstellung in KLAM_21
+                                            ! Standardmäßig 180(-189) (blau) für Vorwärtstrajektorien
+                                            ! und 170(-179) (rot) für Rückwärtstrajektorien (siehe KLAM_21 Farbtabelle)
+/
+
+! 'Rechteck', 'Landuse_Bereich': bitte nur zwei Endpunkte einer Diagonalen angeben in x_koord und y_koord.
