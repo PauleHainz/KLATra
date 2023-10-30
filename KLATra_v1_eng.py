@@ -1208,7 +1208,7 @@ for end_ind in range(0, len(end_ein_list)):
               lu = Landuse.loc[ny-1-l,k]
               x = x - Zeitschritt*u/100                                 # calculate new x-Position (divided by 100, because KLAM_21 in cm/s)
               y = y - Zeitschritt*v/100                                 # calculate new y-Position
-              Zeit = Zeit + Zeitschritt
+              Zeit = Zeit - Zeitschritt
               wind_list.append([u, v, Zeitschritt, g1, g2, t1, t2, ex, hx])
               zeitxy_list.append([Zeit, x, y, lu])
     
