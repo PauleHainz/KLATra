@@ -15,11 +15,51 @@ from datetime import datetime
 import math as m
 import itertools as iter
 
+########## functions #########################
 # function to calculate polygon area for trajectory start density
 # using the Shoelace-formula. From Stackoverflow.
 # (https://stackoverflow.com/questions/24467972/calculate-area-of-polygon-given-x-y-coordinates)
 def PolyArea(x,y):
     return 0.5*np.abs(np.dot(x,np.roll(y,1))-np.dot(y,np.roll(x,1)))
+  
+def random_points_landuse(poly=None):
+    # Find all points in model area
+    alle_punkte =  list(iter.product([(x+0.5)*dx+xlu for x in range(0, nx)], [(y+0.5)*dx+ylu for y in range(0, ny)]))
+    x1=[]; y1=[]
+    for i in range(0,len(Landuse_test.loc[Landuse_test.DN==lu_start,])):
+      lu_poly = Landuse_test.loc[Landuse_test.DN==lu_start,].reset_index().loc[i,"geometry"]
+      lu_path = Path(list(lu_poly.exterior.coords), closed=True)
+      if poly == None:
+        nstart = lu_poly.area/10000*traj_dichte[li]
+        n = m.ceil(nstart)
+        punkte_lu_poly = [alle_punkte[i] for i in np.where(lu_path.contains_points(alle_punkte, radius=-0.05))[0]]
+        if len(punkte_lu_poly) > 0:
+          rng = default_rng(seed=51)               # set seed to get same random starting points for same parameters (same starting density, landuse class)    
+          ind = list(rng.choice(len(punkte_lu_poly), size=n, replace=False))
+          x1 = x1+[punkte_lu_poly[xi][0]-xlu for xi in ind]; y1 = y1+[punkte_lu_poly[xi][1]-ylu for xi in ind]
+      else:
+        punkte_innen = pd.DataFrame([alle_punkte[i] for i in np.where(poly.contains_points(alle_punkte, radius=-0.5))[0]], columns=["x", "y"])
+        if poly.intersects_path(lu_path):
+          nstart = lu_poly.area/10000*traj_dichte[li]
+          n = m.ceil(nstart)
+          punkte_innen2 = [punkte_innen.loc[i,] for i in np.where(lu_path.contains_points(punkte_innen, radius=-0.5))[0]]
+          if len(punkte_innen2) > 0:
+            punkte_lu_poly = [alle_punkte[i] for i in np.where(lu_path.contains_points(alle_punkte, radius=-0.05))[0]]
+            if len(punkte_lu_poly) > 0:
+              n = m.ceil(nstart*len(punkte_innen2)/len(punkte_lu_poly))
+            rng = default_rng(seed=51)               # set seed to get same random starting points for same parameters (same rectangle, starting density, landuse class)
+            ind = list(rng.choice(len(punkte_innen2), size=n, replace=False))
+            x1 = x1+[punkte_innen2[xi][0]-xlu for xi in ind]; y1 = y1+[punkte_innen2[xi][1]-ylu for xi in ind]
+
+    del(alle_punkte)
+    ind_del = []
+    for el in range(0,len(x1)):
+      if Landuse.loc[ny-y1[el]/dx-0.5,x1[el]/dx-0.5] != lu_start:
+        ind_del.append(el)
+    for i in sorted(ind_del, reverse=True):
+        del(x1[i], y1[i])
+
+    return x1, y1
 
 ############ standard values #############
 dt = 300                    # every 5 minutes
@@ -48,6 +88,8 @@ argParser.add_argument("-f", "--file", help="complete path of the input namelist
 input_file = argParser.parse_args().file        # input file (fortran namelist) 
 in_nml = f90nml.read(input_file)                # read input file
 
+directory1 = os.getcwd()
+
 directory = in_nml["input"]["directory"]        # get working directory
 os.chdir(directory)                             # change to working dierectory
 
@@ -67,6 +109,8 @@ if "windfeld" in in_nml["trajektorien"]:
   wind_feld = in_nml["trajektorien"]["windfeld"]
 if "traj_start_dichte" in in_nml["trajektorien"]:
   traj_dichte = in_nml["trajektorien"]["traj_start_dichte"] 
+  if traj_dichte != None and type(traj_dichte) != list:
+    traj_dichte = [traj_dichte]
 if "dt" in in_nml["output"]:
   dt = in_nml["output"]["dt"]                   
 if "format" in in_nml["output"]:
@@ -93,8 +137,6 @@ if type(in_nml["trajektorien"]["y_koord"]) != list:
   in_nml["trajektorien"]["y_koord"] = [in_nml["trajektorien"]["y_koord"]]
 if type(in_nml["trajektorien"]["landuse"]) != list:
   in_nml["trajektorien"]["landuse"] = [in_nml["trajektorien"]["landuse"]]
-if type(traj_dichte) != list:
-  traj_dichte = [traj_dichte]
 if "Ueberwaermungsgebiete" in in_nml["input"]:
   warm = in_nml["input"]["Ueberwaermungsgebiete"]
 if "Quellgebiete" in in_nml["input"]:
@@ -189,11 +231,8 @@ for zeit in iozeit.zt:
   ext = np.array(pd.read_fwf(ext_name, skiprows=9, widths=[5]*nx, header=None, encoding="ISO-8859-1"))
 
   ut_list.append(ut)
-  
   vt_list.append(vt)
-  
   hx_list.append(hxt)
-  
   ex_list.append(ext)
 
 # save all KLAM_21 output data in one DataFrame, to easily get data for the right time and parameter
@@ -247,38 +286,9 @@ for end_ind in range(0, len(end_ein_list)):
           x_eingabe = in_nml["trajektorien"]["x_koord"]
           y_eingabe = in_nml["trajektorien"]["y_koord"]
           koord = list(zip(x_eingabe,y_eingabe))
-          poly = Path(koord, closed=True)                 # create path from input coordinates ("wanted polygon")
+          poly = Path(koord)                 # create path from input coordinates ("wanted polygon")
           
-          # Find all points in model area and determine which are located inside polygon 
-          alle_punkte =  list(iter.product([(x+0.5)*dx+xlu for x in range(0, nx)], [(y+0.5)*dx+ylu for y in range(0, ny)]))
-          punkte_innen = pd.DataFrame([alle_punkte[i] for i in np.where(poly.contains_points(alle_punkte, radius=-0.5))[0]], columns=["x", "y"])
-
-          # x1 and y1 are relative coordinates for calculation start points of the trajectories
-          x1=[]; y1=[]
-          for i in range(0,len(Landuse_test.loc[Landuse_test.DN==lu_start,])):                        # loop over all polygons with wanted landuse
-            lu_poly = Landuse_test.loc[Landuse_test.DN==lu_start,].reset_index().loc[i,"geometry"]    # get polygons geometry
-            lu_path = Path(list(lu_poly.exterior.coords), closed=True)                                # make a path from landuse polygon -> easy to get points inside
-            if poly.intersects_path(lu_path):                                                         # if the landuse polygon and the wanted polygon intersect, points in both will be selected
-              nstart = lu_poly.area/10000*traj_dichte[li]                                             # calculate number of trajectory starting points in landuse polygon
-              n = m.ceil(nstart)
-              punkte_innen2 = [punkte_innen.loc[i,] for i in np.where(lu_path.contains_points(punkte_innen, radius=-0.5))[0]]  # points inside the landuse and the wanted polygon
-              if len(punkte_innen2) > 0:
-                punkte_lu_poly = [alle_punkte[i] for i in np.where(lu_path.contains_points(alle_punkte, radius=-0.05))[0]]     # points inside landuse polygon
-                if len(punkte_lu_poly) > 0:
-                  n = m.ceil(nstart*len(punkte_innen2)/len(punkte_lu_poly))       # calculate number of trajectory starting points in intersection ofwanted and landuse polygons
-                rng = default_rng(seed=51)                # set seed to get same random starting points for same parameters (same polygon, starting density, landuse class)    
-                ind = list(rng.choice(len(punkte_innen2), size=n, replace=False))
-                x1 = x1+[punkte_innen2[xi][0]-xlu for xi in ind]; y1 = y1+[punkte_innen2[xi][1]-ylu for xi in ind]
-          del(alle_punkte)
-      
-          # delete points in x1 and y1 with wrong landuse class.
-          ind_del = []
-          for el in range(0,len(x1)):
-            if Landuse.loc[ny-y1[el]/dx-0.5,x1[el]/dx-0.5] != lu_start:
-              ind_del.append(el)
-          
-          for i in sorted(ind_del, reverse=True):
-              del(x1[i], y1[i])
+          x1, y1 = random_points_landuse(poly)      
 
         ##### Landuse in part of the area (defined by rectangle)
         elif in_nml["trajektorien"]["art"] == 'Landuse_Bereich':
@@ -286,59 +296,14 @@ for end_ind in range(0, len(end_ein_list)):
           y_eingabe = in_nml["trajektorien"]["y_koord"]           # absolute coordinates (don´t substract xlu or ylu)
           y_ein = [y_eingabe[0],y_eingabe[0],y_eingabe[1],y_eingabe[1]]
           koord = list(zip(2*x_eingabe,y_ein))
-          poly = Path(koord, closed=True)
+          poly = Path(koord)
   
-          # Find all points in model area and determine which are located inside rectangle (punkte_innen)
-          alle_punkte =  list(iter.product([(x+0.5)*dx+xlu for x in range(0, nx)], [(y+0.5)*dx+ylu for y in range(0, ny)]))
-          punkte_innen = pd.DataFrame([alle_punkte[i] for i in np.where(poly.contains_points(alle_punkte, radius=-0.5))[0]], columns=["x", "y"])
-
-          x1=[]; y1=[]
-          for i in range(0,len(Landuse_test.loc[Landuse_test.DN==lu_start,])):
-            lu_poly = Landuse_test.loc[Landuse_test.DN==lu_start,].reset_index().loc[i,"geometry"]
-            lu_path = Path(list(lu_poly.exterior.coords), closed=True)
-            if poly.intersects_path(lu_path):
-              nstart = lu_poly.area/10000*traj_dichte[li]
-              n = m.ceil(nstart)
-              punkte_innen2 = [punkte_innen.loc[i,] for i in np.where(lu_path.contains_points(punkte_innen, radius=-0.5))[0]]
-              if len(punkte_innen2) > 0:
-                punkte_lu_poly = [alle_punkte[i] for i in np.where(lu_path.contains_points(alle_punkte, radius=-0.05))[0]]
-                if len(punkte_lu_poly) > 0:
-                  n = m.ceil(nstart*len(punkte_innen2)/len(punkte_lu_poly))
-                rng = default_rng(seed=51)               # set seed to get same random starting points for same parameters (same rectangle, starting density, landuse class)   
-                ind = list(rng.choice(len(punkte_innen2), size=n, replace=False))
-                x1 = x1+[punkte_innen2[xi][0]-xlu for xi in ind]; y1 = y1+[punkte_innen2[xi][1]-ylu for xi in ind]
-          del(alle_punkte)
-          ind_del = []
-          for el in range(0,len(x1)):
-            if Landuse.loc[ny-y1[el]/dx-0.5,x1[el]/dx-0.5] != lu_start:
-              ind_del.append(el)
-          
-          for i in sorted(ind_del, reverse=True):
-              del(x1[i], y1[i])
+          x1, y1 = random_points_landuse(poly)      
 
         #### Landuse in whole model area
         elif in_nml["trajektorien"]["art"] == 'Landuse':
   
-          alle_punkte =  list(iter.product([(x+0.5)*dx+xlu for x in range(0, nx)], [(y+0.5)*dx+ylu for y in range(0, ny)]))
-          x1=[]; y1=[]
-          for i in range(0,len(Landuse_test.loc[Landuse_test.DN==lu_start,])):
-            lu_poly = Landuse_test.loc[Landuse_test.DN==lu_start,].reset_index().loc[i,"geometry"]
-            lu_path = Path(list(lu_poly.exterior.coords), closed=True)
-            nstart = lu_poly.area/10000*traj_dichte[li]
-            n = m.ceil(nstart)
-            punkte_lu_poly = [alle_punkte[i] for i in np.where(lu_path.contains_points(alle_punkte, radius=-0.05))[0]]
-            if len(punkte_lu_poly) > 0:
-              rng = default_rng(seed=51)               # set seed to get same random starting points for same parameters (same starting density, landuse class)    
-              ind = list(rng.choice(len(punkte_lu_poly), size=n, replace=False))
-              x1 = x1+[punkte_lu_poly[xi][0]-xlu for xi in ind]; y1 = y1+[punkte_lu_poly[xi][1]-ylu for xi in ind]
-          del(alle_punkte)
-          ind_del = []
-          for el in range(0,len(x1)):
-            if Landuse.loc[ny-y1[el]/dx-0.5,x1[el]/dx-0.5] != lu_start:
-              ind_del.append(el)
-          
-          for i in sorted(ind_del, reverse=True):
-              del(x1[i], y1[i])
+          x1, y1 = random_points_landuse(poly)      
     
       ##### every cell with specific landuse class   
       else:
@@ -384,7 +349,7 @@ for end_ind in range(0, len(end_ein_list)):
           # forward trajectory calculation
           if Startzeit[p_traj] < Endzeit[p_traj]:
             while Zeit < Endzeit[p_traj]:                     # calculates coordinates until end time is exceeded
-              mgv = 0                                         # indicator, whether trajectory left the model area
+              outside_model_area = False                                         # indicator, whether trajectory left the model area
   
               if Zeit > t2:                                   # if time used for temporal interpolation is exceeded, adjust t1 and t2
                 t1, t2 = iozeit.loc[(iozeit["zt"]<=Zeit)][-1:].zt.item(),iozeit.loc[(iozeit["zt"]>Zeit)][:1].zt.item()
@@ -406,7 +371,7 @@ for end_ind in range(0, len(end_ein_list)):
   
               # spatial interpolation, if useful. Save spatially interpolated values for both times (earlier iozeit as 1, later as 2)
               if x < 0 or y < 0  or x > nml["grid"]["nx"]*dx or y > nml["grid"]["ny"]*dx : # point is located outside model region
-                mgv = 1      # indicator for trajectory leaving model area
+                outside_model_area = True      # indicator for trajectory leaving model area
                 break
               elif min(indices.x) < 0 or min(indices.y) < 0 or max(indices.x) > nx or max(indices.y) > ny:
                 # point lies at the edge of the model area.
@@ -476,14 +441,14 @@ for end_ind in range(0, len(end_ein_list)):
             trajektorie = pd.DataFrame(np.column_stack((zeitxy_list, wind_list)), columns=["Zeit", "x", "y", "LU", "u", "v", "Zeitschritt", "g1", "g2", "t1", "t2", "ex", "hx"])
             trajektorie["dt"] = round(trajektorie["Zeit"]-Startzeit[p_traj])
             trajektorie["ws"] = ((trajektorie["u"]/100)**2+(trajektorie["v"]/100)**2)**0.5
-            if mgv == 1:
+            if outside_model_area:
               trajektorie.fillna(-55.55, inplace=True)
             traj_list.append(trajektorie)                               # When all points of a trajectory are calculated, the whole dataframe is appended to this list
   
           # backward trajectory calculation
           elif Startzeit[p_traj] > Endzeit[p_traj]:
             while Zeit > Endzeit[p_traj]:                               # calculates coordinates until time is less than end time 
-              mgv = 0
+              outside_model_area = False
   
               if Zeit < t1:                                             # if time is less than t1, t1 will become t2 and a new t1 is found
                 t1, t2 = iozeit.loc[(iozeit["zt"]<=Zeit)][-1:].zt.item(),iozeit.loc[(iozeit["zt"]>Zeit)][:1].zt.item()
@@ -505,7 +470,7 @@ for end_ind in range(0, len(end_ein_list)):
   
               # spatial interpolation, if useful. Save spatially interpolated values for both times (earlier iozeit as 1, later as 2)
               if x < 0 or y < 0  or x > nml["grid"]["nx"]*dx or y > nml["grid"]["ny"]*dx : # point is located outside model region
-                mgv = 1      # indicator for trajectory leaving model area
+                outside_model_area = True      # indicator for trajectory leaving model area
                 break
               elif min(indices.x) < 0 or min(indices.y) < 0 or max(indices.x) > nx or max(indices.y) > ny:
                 # point lies at the edge of the model area.
@@ -575,7 +540,7 @@ for end_ind in range(0, len(end_ein_list)):
             trajektorie = pd.DataFrame(np.column_stack((zeitxy_list, wind_list)), columns=["Zeit", "x", "y", "LU", "u", "v", "Zeitschritt", "g1", "g2", "t1", "t2", "ex", "hx"])
             trajektorie["dt"] = round(Startzeit[p_traj]-trajektorie["Zeit"])
             trajektorie["ws"] = ((trajektorie["u"]/100)**2+(trajektorie["v"]/100)**2)**0.5
-            if mgv == 1:
+            if outside_model_area:
               trajektorie.fillna(-55.55, inplace=True)
             traj_list.append(trajektorie)                                # When all points of a trajectory are calculated, the whole dataframe is appended to this list
             
@@ -884,12 +849,13 @@ for end_ind in range(0, len(end_ein_list)):
         print("Saving took so long: ", datetime.now()-now)
     # 
   else:
+    out_file_name = directory+in_nml["output"]["out_dir"]+out_file+str(start_ein[0])+"_"+str(end_ein[0])
     ##### Polygon
     if in_nml["trajektorien"]["art"] == 'Polygon':
       x_eingabe = in_nml["trajektorien"]["x_koord"]
       y_eingabe = in_nml["trajektorien"]["y_koord"]
       koord = list(zip(x_eingabe,y_eingabe))
-      poly = Path(koord, closed=True)
+      poly = Path(koord)
       
       alle_punkte =  list(iter.product([(x+0.5)*dx+xlu for x in range(0, nx)], [(y+0.5)*dx+ylu for y in range(0, ny)]))
     
@@ -903,6 +869,7 @@ for end_ind in range(0, len(end_ein_list)):
           rng = default_rng(seed=51)                # seed setzen, um immer gleiche Punkte zufällig zu erhalten (bei gleichem Eingabezeugs)    
           ind = list(rng.choice(len(punkte_innen), size=n, replace=False))
           x1 = x1+[punkte_innen[xi][0]-xlu for xi in ind]; y1 = y1+[punkte_innen[xi][1]-ylu for xi in ind]
+
       else:
         punkte_innen = [alle_punkte[i] for i in np.where(poly.contains_points(alle_punkte, radius=-0.5))[0]]
         x1 = [punkte_innen[xi][0]-xlu for xi in range(0,len(punkte_innen))]
@@ -914,8 +881,8 @@ for end_ind in range(0, len(end_ein_list)):
     elif in_nml["trajektorien"]["art"] == 'Einzel':
       x1 = [xk-xlu for xk in in_nml["trajektorien"]["x_koord"]]                                         
       y1 = [yk-ylu for yk in in_nml["trajektorien"]["y_koord"]]
+
       
-     
     ##### Rechteck (gefüllt)
     elif in_nml["trajektorien"]["art"] == "Rechteck":
       x_eingabe = in_nml["trajektorien"]["x_koord"]
@@ -930,7 +897,7 @@ for end_ind in range(0, len(end_ein_list)):
         rng = default_rng(seed=51)                # seed setzen, um immer gleiche Punkte zufällig zu erhalten (bei gleichem Eingabezeugs)    
         ind = list(rng.choice(len(koord), size=n, replace=False))
         x1 = x1+[koord[xi][0]-xlu for xi in ind]; y1 = y1+[koord[xi][1]-ylu for xi in ind]
-        
+
       else:
         x1 = [k[0]-xlu for k in koord]; y1 = [k[1]-ylu for k in koord]
   
@@ -944,9 +911,9 @@ for end_ind in range(0, len(end_ein_list)):
         x1 = list(rng.integers(min(x_eingabe)-xlu,max(x_eingabe)-xlu, size=n))
         rng = default_rng(seed=51)                # seed setzen, um immer gleiche Punkte zufällig zu erhalten (bei gleichem Eingabezeugs)    
         y1 = list(rng.integers(min(y_eingabe)-ylu,max(y_eingabe)-ylu, size=n))
-        
+
       else:
-        print("Bitte traj_start_dichte in der Steuerdatei angeben oder art='Rechteck' statt 'Rechteck_r'.")
+        print("Please add traj_start_dichte in the input file or change art to='Rechteck' instead of 'Rechteck_r'.")
         print("Program exits now.")
         exit()
     
@@ -958,570 +925,548 @@ for end_ind in range(0, len(end_ein_list)):
       x1 = x1+[(xind_ein[-1]+0.5)*dx]*len(yind_ein)+[(xind_ein[0]+0.5)*dx]*len(yind_ein)+[(x+0.5)*dx for x in xind_ein]
       y1 = [(yind_ein[0]+0.5)*dx]*len(xind_ein)
       y1 = y1+[(y+0.5)*dx for y in yind_ein]*2+[(yind_ein[-1]+0.5)*dx]*len(xind_ein)
-      
+
         
     else:
-      print("Keine gültige Eingabe in Trajektorien art. Programm wird geschlossen.")
+      print("No valid value in art in the input file. Program exits now.")
       exit()
-    
-    if (in_nml["trajektorien"]["art"] not in ['Einzel', 'Rechteckrand']) and traj_dichte == None:
-      print("Es sollen jetzt "+str(len(x1))+" Trajektorien berechnet werden. Soll wirklich keine Trajektorienstartdichte in der Startdatei angegeben werden?")
-      print("Wenn hier eine Trajektorienstartdichte angegeben wird, wird diese in einer neuen Startdatei (.changed) gespeichert.")
-      while True:
-        abbruch = input("Tippe j, um das Programm unverändert laufen zu lassen, t, um eine Trajektorienstartdichte anzugeben, oder q, um abzubrechen: ")
-        if abbruch not in ["j", "t", "q"]:
-          print("Das ist keine valide Eingabe. Gib bitte j, t oder n ein: ")
-        else: 
-          if abbruch == "q":
-            print("Programm wird geschlossen.")
-            exit()
-          elif abbruch == "t":
-            while True:
-              try:
-                traj_dichte = float(input("Pro Hektar sollen so viele Trajektorien starten (bitte Zahl eingeben): "))
-                break
-              except: 
-                print("Bitte eine Zahl aus Ziffern eingeben, wenn es eine Dezimalzahl ist, mit \".\" als Trennzeichen.")
-            in_nml["trajektorien"]["traj_start_dichte"] = traj_dichte
-            f90nml.write(in_nml, input_file+".changed")
-          else:
-            print("Ok, dann fahren wir so fort.")
-        
-      xy = pd.DataFrame({"x":x1,"y":y1})
-      xy.drop_duplicates(inplace=True)
-      x1 = xy.x; y1 = xy.y
-      Startzeit = [start_ein[0]]*len(x1)
-      Endzeit = [end_ein[0]]*len(x1)
+      
+       
+    xy = pd.DataFrame({"x":x1,"y":y1})
+    xy.drop_duplicates(inplace=True)
+    x1 = xy.x; y1 = xy.y
+    Startzeit = [start_ein[0]]*len(x1)
+    Endzeit = [end_ein[0]]*len(x1)
 
-      print("Calculation of starting points took so long: ", datetime.now()-now)
-      if len(x1) == 0:
-        print("With these parameters no trajectories are calculated.")
+    print("Calculation of starting points took so long: ", datetime.now()-now)
+    if len(x1) == 0:
+      print("With these parameters no trajectories are calculated.")
+    else:
+      if len(x1) == 1:
+        print(str(len(x1))+" trajectory will be calculated.")
       else:
-        if len(x1) == 1:
-          print(str(len(x1))+" trajectory will be calculated.")
-        else:
-          print(str(len(x1))+" trajectories will be calculated.")
+        print(str(len(x1))+" trajectories will be calculated.")
+      
+      now = datetime.now()
+  
+      traj_list=list()                    # list, in which all trajectories dataframes will be saved
+      for p_traj in range(0,len(x1)):
+        x = x1[p_traj]
+        y = y1[p_traj]
+        Zeit = Startzeit[p_traj]
+  
+        kf = x/dx                                     # x-index with decimal places
+        lf = y/dx                                     # y-index with decimal places
+        k = int(kf)                                   # x-index
+        l = int(lf)                                   # y-index
+  
+        zeitxy_list = [[Zeit,x,y,Landuse.loc[ny-1-l,k]]]
+        wind_list = []
         
-        now = datetime.now()
-    
-        traj_list=list()                    # list, in which all trajectories dataframes will be saved
-        for p_traj in range(0,len(x1)):
-          x = x1[p_traj]
-          y = y1[p_traj]
-          Zeit = Startzeit[p_traj]
-    
-          kf = x/dx                                     # x-index with decimal places
-          lf = y/dx                                     # y-index with decimal places
-          k = int(kf)                                   # x-index
-          l = int(lf)                                   # y-index
-    
-          zeitxy_list = [[Zeit,x,y,Landuse.loc[ny-1-l,k]]]
-          wind_list = []
+        # KLAM_21 output times between which the trajectory calculation starts, used for temporal interpolation
+        # if t1 or t2 is exceeded whilst calculatińg, these times are adjusted so that the trajectory time lays again between two output times (or is equal to one of them)
+        t1, t2 = iozeit.loc[(iozeit["zt"]<=Zeit)][-1:].zt.item(),iozeit.loc[(iozeit["zt"]>Zeit)][:1].zt.item()
+  
+        # forward trajectory calculation
+        if Startzeit[p_traj] < Endzeit[p_traj]:
+          while Zeit < Endzeit[p_traj]:                     # calculates coordinates until end time is exceeded
+            outside_model_area = False                                         # indicator, whether trajectory left the model area
+  
+            if Zeit > t2:                                   # if time used for temporal interpolation is exceeded, adjust t1 and t2
+              t1, t2 = iozeit.loc[(iozeit["zt"]<=Zeit)][-1:].zt.item(),iozeit.loc[(iozeit["zt"]>Zeit)][:1].zt.item()
+  
+            kf = x/dx                                     # x-index with decimal places
+            lf = y/dx                                     # y-index with decimal places
+            k = int(kf)                                   # x-index
+            l = int(lf)                                   # y-index
+            xdec = kf-k                                   # x decimal place (to calculate quadrant)
+            ydec = lf-l                                   # y decimal place (to calculate quadrant)
+  
+            # find quadrant of the raster cell where trajectory is "currently" and get raster cells indices for spatial interpolation
+            if xdec >= 0.5:
+              if ydec >= 0.5: indices = pd.DataFrame({"x":[k, k, k+1, k+1], "y":[l, l+1, l+1, l]}) # quadrant 1
+              else: indices = pd.DataFrame({"x":[k, k, k+1, k+1], "y":[l, l-1, l-1, l]}) # quadrant 4
+            else:
+              if ydec >= 0.5: indices = pd.DataFrame({"x":[k, k, k-1, k-1], "y":[l, l+1, l+1, l]}) # quadrant 2
+              else: indices = pd.DataFrame({"x":[k, k, k-1, k-1], "y":[l, l-1, l-1, l]}) # quadrant 3
+  
+            # spatial interpolation, if useful. Save spatially interpolated values for both times (earlier iozeit as 1, later as 2)
+            if x < 0 or y < 0  or x > nml["grid"]["nx"]*dx or y > nml["grid"]["ny"]*dx : # point is located outside model region
+              outside_model_area = True      # indicator for trajectory leaving model area
+              break
+            elif min(indices.x) < 0 or min(indices.y) < 0 or max(indices.x) > nx or max(indices.y) > ny:
+              # point lies at the edge of the model area.
+              # no spatial interpolation is used.
+              v1 = wind_df.loc[t1,"vt"][ny-1-l,k]
+              u1 = wind_df.loc[t1,"ut"][ny-1-l,k]
+              v2 = wind_df.loc[t2,"vt"][ny-1-l,k]
+              u2 = wind_df.loc[t2,"ut"][ny-1-l,k]
+              hx1 = wind_df.loc[t1,"hx"][ny-1-l,k]
+              hx2 = wind_df.loc[t2,"hx"][ny-1-l,k]
+              ex1 = wind_df.loc[t1,"ex"][ny-1-l,k]
+              ex2 = wind_df.loc[t2,"ex"][ny-1-l,k]
+            elif (x == (k+0.5)*dx) & (y == (l+0.5)*dx):
+              # no interpoolation as trajectory is located in raster cells middle
+              v1 = wind_df.loc[t1,"vt"][ny-1-l,k]
+              u1 = wind_df.loc[t1,"ut"][ny-1-l,k]
+              v2 = wind_df.loc[t2,"vt"][ny-1-l,k]
+              u2 = wind_df.loc[t2,"ut"][ny-1-l,k]
+              hx1 = wind_df.loc[t1,"hx"][ny-1-l,k]
+              hx2 = wind_df.loc[t2,"hx"][ny-1-l,k]
+              ex1 = wind_df.loc[t1,"ex"][ny-1-l,k]
+              ex2 = wind_df.loc[t2,"ex"][ny-1-l,k]
+            else:
+              # spatial interpolation of 4 raster cells
+              # calculation of inverse distance weights
+              indices["x_koord"] = (indices.x+0.5)*dx
+              indices["y_koord"] = (indices.y+0.5)*dx
+              indices["Entfernung"] = ((x-indices.x_koord)**2+(y-indices.y_koord)**2)**0.5
+              indices["inverse_distance"] = indices.Entfernung**-p
+              indices["gewicht"] = indices.inverse_distance/sum(indices.inverse_distance)
+              # spatial Interpolation
+              v1 = 0
+              u1 = 0
+              v2 = 0
+              u2 = 0
+              hx1 = 0; hx2 = 0; ex1 = 0; ex2 = 0
+              for i in range(0,len(indices)):
+                v1 = v1 + wind_df.loc[t1,"vt"][ny-1-indices.y[i],indices.x[i]] * indices.gewicht[i]
+                u1 = u1 + wind_df.loc[t1,"ut"][ny-1-indices.y[i],indices.x[i]] * indices.gewicht[i]
+                hx1 = hx1 + wind_df.loc[t1,"hx"][ny-1-indices.y[i],indices.x[i]] * indices.gewicht[i]
+                ex1 = ex1 + wind_df.loc[t1,"ex"][ny-1-indices.y[i],indices.x[i]] * indices.gewicht[i]
+                v2 = v2 + wind_df.loc[t2,"vt"][ny-1-indices.y[i],indices.x[i]] * indices.gewicht[i]
+                u2 = u2 + wind_df.loc[t2,"ut"][ny-1-indices.y[i],indices.x[i]] * indices.gewicht[i]
+                hx2 = hx2 + wind_df.loc[t2,"hx"][ny-1-indices.y[i],indices.x[i]] * indices.gewicht[i]
+                ex2 = ex2 + wind_df.loc[t2,"ex"][ny-1-indices.y[i],indices.x[i]] * indices.gewicht[i]
+  
+            # calculate mean of timesteps used by KLAM_21 that are closest in simualtion time
+            # if fixed time step calculating mean of same time steps -> doesn't change time step
+            Zeitschritt = times[np.abs(times[:,1]-Zeit).argsort()[:2],0].min()
+  
+            g1 = (t2-Zeit)/(t2-t1)                                    # weight for data from iozeit 1
+            g2 = (Zeit-t1)/(t2-t1)                                    # weight for data from iozeit 2
+  
+            v = v1*g1+v2*g2                                           # calculate spatially and temporally interpolated
+            u = u1*g1+u2*g2                                           # values of the wind field and cold air layer
+            hx = hx1*g1+hx2*g2                                        # for current position
+            ex = ex1*g1+ex2*g2
+  
+            lu = Landuse.loc[ny-1-l,k]
+            x = x + Zeitschritt*u/100                                 # calculate new x-Position (divided by 100, because KLAM_21 in cm/s)
+            y = y + Zeitschritt*v/100                                 # calculate new y-Position
+            Zeit = Zeit + Zeitschritt
+            wind_list.append([u, v, Zeitschritt, g1, g2, t1, t2, ex, hx])
+            zeitxy_list.append([Zeit, x, y, lu])
+  
+          wind_list.append([np.nan]*9)
+          trajektorie = pd.DataFrame(np.column_stack((zeitxy_list, wind_list)), columns=["Zeit", "x", "y", "LU", "u", "v", "Zeitschritt", "g1", "g2", "t1", "t2", "ex", "hx"])
+          trajektorie["dt"] = round(trajektorie["Zeit"]-Startzeit[p_traj])
+          trajektorie["ws"] = ((trajektorie["u"]/100)**2+(trajektorie["v"]/100)**2)**0.5
+          if outside_model_area:
+            trajektorie.fillna(-55.55, inplace=True)
+          traj_list.append(trajektorie)                               # When all points of a trajectory are calculated, the whole dataframe is appended to this list
+  
+        # backward trajectory calculation
+        elif Startzeit[p_traj] > Endzeit[p_traj]:
+          while Zeit > Endzeit[p_traj]:                               # calculates coordinates until time is less than end time 
+            outside_model_area = False
+  
+            if Zeit < t1:                                             # if time is less than t1, t1 will become t2 and a new t1 is found
+              t1, t2 = iozeit.loc[(iozeit["zt"]<=Zeit)][-1:].zt.item(),iozeit.loc[(iozeit["zt"]>Zeit)][:1].zt.item()
+  
+            kf = x/dx   # x-index with decimal places
+            lf = y/dx   # y-index with decimal places
+            k = int(kf) # x-Index
+            l = int(lf) # y-Index
+            xdec = kf-k # x decimal place (for quadrants)
+            ydec = lf-l # y decimal place (for quadrants)
+  
+            # find quadrant of the raster cell where trajectory is "currently" and get raster cells indices for spatial interpolation
+            if xdec >= 0.5:
+              if ydec >= 0.5: indices = pd.DataFrame({"x":[k, k, k+1, k+1], "y":[l, l+1, l+1, l]}) # Q1
+              else: indices = pd.DataFrame({"x":[k, k, k+1, k+1], "y":[l, l-1, l-1, l]}) # Q4
+            else:
+              if ydec >= 0.5: indices = pd.DataFrame({"x":[k, k, k-1, k-1], "y":[l, l+1, l+1, l]}) # Q2
+              else: indices = pd.DataFrame({"x":[k, k, k-1, k-1], "y":[l, l-1, l-1, l]}) # Q3
+  
+            # spatial interpolation, if useful. Save spatially interpolated values for both times (earlier iozeit as 1, later as 2)
+            if x < 0 or y < 0  or x > nml["grid"]["nx"]*dx or y > nml["grid"]["ny"]*dx : # point is located outside model region
+              outside_model_area = True      # indicator for trajectory leaving model area
+              break
+            elif min(indices.x) < 0 or min(indices.y) < 0 or max(indices.x) > nx or max(indices.y) > ny:
+              # point lies at the edge of the model area.
+              # no spatial interpolation is used.
+              v1 = wind_df.loc[t1,"vt"][ny-1-l,k]
+              u1 = wind_df.loc[t1,"ut"][ny-1-l,k]
+              v2 = wind_df.loc[t2,"vt"][ny-1-l,k]
+              u2 = wind_df.loc[t2,"ut"][ny-1-l,k]
+              hx1 = wind_df.loc[t1,"hx"][ny-1-l,k]
+              hx2 = wind_df.loc[t2,"hx"][ny-1-l,k]
+              ex1 = wind_df.loc[t1,"ex"][ny-1-l,k]
+              ex2 = wind_df.loc[t2,"ex"][ny-1-l,k]
+            elif (x == (k+0.5)*dx) & (y == (l+0.5)*dx):
+              # no interpoolation as trajectory is located in raster cells middle
+              v1 = wind_df.loc[t1,"vt"][ny-1-l,k]
+              u1 = wind_df.loc[t1,"ut"][ny-1-l,k]
+              v2 = wind_df.loc[t2,"vt"][ny-1-l,k]
+              u2 = wind_df.loc[t2,"ut"][ny-1-l,k]
+              hx1 = wind_df.loc[t1,"hx"][ny-1-l,k]
+              hx2 = wind_df.loc[t2,"hx"][ny-1-l,k]
+              ex1 = wind_df.loc[t1,"ex"][ny-1-l,k]
+              ex2 = wind_df.loc[t2,"ex"][ny-1-l,k]
+            else:
+              # spatial interpolation of 4 raster cells
+              # calculation of inverse distance weights
+              indices["x_koord"] = (indices.x+0.5)*dx
+              indices["y_koord"] = (indices.y+0.5)*dx
+              indices["Entfernung"] = ((x-indices.x_koord)**2+(y-indices.y_koord)**2)**0.5
+              indices["inverse_distance"] = indices.Entfernung**-p
+              indices["gewicht"] = indices.inverse_distance/sum(indices.inverse_distance)
+              # spatial Interpolation
+              v1 = 0
+              u1 = 0
+              v2 = 0
+              u2 = 0
+              hx1 = 0; hx2 = 0; ex1 = 0; ex2 = 0
+              for i in range(0,len(indices)):
+                v1 = v1 + wind_df.loc[t1,"vt"][ny-1-indices.y[i],indices.x[i]] * indices.gewicht[i]
+                u1 = u1 + wind_df.loc[t1,"ut"][ny-1-indices.y[i],indices.x[i]] * indices.gewicht[i]
+                hx1 = hx1 + wind_df.loc[t1,"hx"][ny-1-indices.y[i],indices.x[i]] * indices.gewicht[i]
+                ex1 = ex1 + wind_df.loc[t1,"ex"][ny-1-indices.y[i],indices.x[i]] * indices.gewicht[i]
+                v2 = v2 + wind_df.loc[t2,"vt"][ny-1-indices.y[i],indices.x[i]] * indices.gewicht[i]
+                u2 = u2 + wind_df.loc[t2,"ut"][ny-1-indices.y[i],indices.x[i]] * indices.gewicht[i]
+                hx2 = hx2 + wind_df.loc[t2,"hx"][ny-1-indices.y[i],indices.x[i]] * indices.gewicht[i]
+                ex2 = ex2 + wind_df.loc[t2,"ex"][ny-1-indices.y[i],indices.x[i]] * indices.gewicht[i]
+  
+            # calculate mean of timesteps used by KLAM_21 that are closest in simualtion time
+            # if fixed time step calculating mean of same time steps -> doesn't change time step
+            Zeitschritt = times[np.abs(times[:,1]-Zeit).argsort()[:2],0].min()
+  
+            g1 = (t2-Zeit)/(t2-t1)                                    # weight for data from iozeit 1
+            g2 = (Zeit-t1)/(t2-t1)                                    # weight for data from iozeit 2
+  
+            v = v1*g1+v2*g2                                           # calculate spatially and temporally interpolated
+            u = u1*g1+u2*g2                                           # values of the wind field and cold air layer
+            hx = hx1*g1+hx2*g2                                        # for current position
+            ex = ex1*g1+ex2*g2
+  
+            lu = Landuse.loc[ny-1-l,k]
+            x = x - Zeitschritt*u/100                                 # calculate new x-Position (divided by 100, because KLAM_21 output is in cm/s)
+            y = y - Zeitschritt*v/100                                 # calculate new y-Position
+            Zeit = Zeit - Zeitschritt
+            wind_list.append([u, v, Zeitschritt, g1, g2, t1, t2, ex, hx])
+            zeitxy_list.append([Zeit, x, y, lu])
+  
+          wind_list.append([np.nan]*9)
+          trajektorie = pd.DataFrame(np.column_stack((zeitxy_list, wind_list)), columns=["Zeit", "x", "y", "LU", "u", "v", "Zeitschritt", "g1", "g2", "t1", "t2", "ex", "hx"])
+          trajektorie["dt"] = round(Startzeit[p_traj]-trajektorie["Zeit"])
+          trajektorie["ws"] = ((trajektorie["u"]/100)**2+(trajektorie["v"]/100)**2)**0.5
+          if outside_model_area:
+            trajektorie.fillna(-55.55, inplace=True)
+          traj_list.append(trajektorie)                                # When all points of a trajectory are calculated, the whole dataframe is appended to this list
+  
+      print("Trajectory calculation took so long: ", datetime.now()-now)
+      now = datetime.now()
+      #################################################################################
+      # Saving the trajectories
+  
+      if "KLAM" in out_format:
+        for i in range(0, len(traj_list)):   # loop over all calculated trajectories
+          # get data frame from traj_list
+          trajek = traj_list[i].copy()
+          trajek["lahm"] = trajek.ws < ws_th      # find times where wind speed is smaller than the wind speed treshold
+          trajek["summe"] = trajek.dt             
+          # cumulative sum of time steps where wind speed is less than the treshold
+          trajek["summe"] = trajek["summe"].sub(trajek["summe"].mask(trajek.lahm).ffill().fillna(0)).astype(int) 
+          trajek["lahmer"] = trajek.ws.diff() < 0    # find decreasing wind speeds
+          trajek["summe1"] = trajek.summe
+          # cumulative sum of time steps where wind speed is less than treshold and decreasing
+          trajek["summe1"] = trajek["summe1"].sub(trajek["summe1"].mask(trajek.lahmer).ffill().fillna(0)).astype(int)
+          # cut trajectory if th_time is met or exceeded by cumulative sum of time steps where decreasing wind speed is less than treshold
+          if max(trajek.summe1) >= th_time:
+            ind_drop = trajek.loc[trajek.summe1>=th_time,"summe1"].index[0]
+            trajekt = trajek.loc[:ind_drop,:"ws"]
+            trajekt.loc[ind_drop,["u","v","ws","ex","hx","Zeitschritt"]] = [-1111,-1111,-11.11,-111.1,-111.1,-11.11]
+          else: 
+            trajekt = trajek.loc[:,:"ws"]
+          # create data frame with trajectory starting point, values around every dt seconds and last calculated position (or last position before trajectory was cut 
+          # because of wind speed)
+          test = pd.DataFrame(trajekt.loc[trajekt.index==0])
+          if Startzeit[i] < Endzeit[i]:
+            for dti in range(dt+int(test.loc[0,"Zeit"]),int(test.loc[0,"Zeit"])+int(max(trajekt.dt)),dt):
+              test = pd.concat([test, trajekt.loc[np.argsort(np.argsort(round(abs(trajekt['Zeit']-dti))))==0]])
+          else:
+            for dti in range(int(test.loc[0,"Zeit"])-dt,int(test.loc[0,"Zeit"])-int(max(trajekt.dt)),-dt):
+              test = pd.concat([test, trajekt.loc[np.argsort(np.argsort(round(abs(trajekt['Zeit']-dti))))==0]])
+          test = pd.concat([test,  trajekt.loc[trajekt.index==max(trajekt.index)]], ignore_index=True)
+          test = test.drop_duplicates()                # if there are duplicate rows the duplicate is dropped.
           
-          # KLAM_21 output times between which the trajectory calculation starts, used for temporal interpolation
-          # if t1 or t2 is exceeded whilst calculatińg, these times are adjusted so that the trajectory time lays again between two output times (or is equal to one of them)
-          t1, t2 = iozeit.loc[(iozeit["zt"]<=Zeit)][-1:].zt.item(),iozeit.loc[(iozeit["zt"]>Zeit)][:1].zt.item()
-    
-          # forward trajectory calculation
-          if Startzeit[p_traj] < Endzeit[p_traj]:
-            while Zeit < Endzeit[p_traj]:                     # calculates coordinates until end time is exceeded
-              mgv = 0                                         # indicator, whether trajectory left the model area
-    
-              if Zeit > t2:                                   # if time used for temporal interpolation is exceeded, adjust t1 and t2
-                t1, t2 = iozeit.loc[(iozeit["zt"]<=Zeit)][-1:].zt.item(),iozeit.loc[(iozeit["zt"]>Zeit)][:1].zt.item()
-    
-              kf = x/dx                                     # x-index with decimal places
-              lf = y/dx                                     # y-index with decimal places
-              k = int(kf)                                   # x-index
-              l = int(lf)                                   # y-index
-              xdec = kf-k                                   # x decimal place (to calculate quadrant)
-              ydec = lf-l                                   # y decimal place (to calculate quadrant)
-    
-              # find quadrant of the raster cell where trajectory is "currently" and get raster cells indices for spatial interpolation
-              if xdec >= 0.5:
-                if ydec >= 0.5: indices = pd.DataFrame({"x":[k, k, k+1, k+1], "y":[l, l+1, l+1, l]}) # quadrant 1
-                else: indices = pd.DataFrame({"x":[k, k, k+1, k+1], "y":[l, l-1, l-1, l]}) # quadrant 4
+          # spatial join of warm target areas with every output position, if wanted
+          if "Ueberwaermungsgebiete" in in_nml["input"]:
+            for q in range(len(test)):
+              geometry = [Point(test.loc[q,"x"]+xlu, test.loc[q,"y"]+ylu)]
+              stbz = gpd.GeoDataFrame(geometry=geometry, crs=in_nml["input"]["koord_system"])
+              bezirk = gpd.sjoin(umriss, stbz, "inner", "contains")
+              if len(bezirk[name_warm].values) > 0:        
+                  test.loc[q,"Überwärmungsgebiet"] = bezirk[name_warm].values[0]
               else:
-                if ydec >= 0.5: indices = pd.DataFrame({"x":[k, k, k-1, k-1], "y":[l, l+1, l+1, l]}) # quadrant 2
-                else: indices = pd.DataFrame({"x":[k, k, k-1, k-1], "y":[l, l-1, l-1, l]}) # quadrant 3
-    
-              # spatial interpolation, if useful. Save spatially interpolated values for both times (earlier iozeit as 1, later as 2)
-              if x < 0 or y < 0  or x > nml["grid"]["nx"]*dx or y > nml["grid"]["ny"]*dx : # point is located outside model region
-                mgv = 1      # indicator for trajectory leaving model area
-                break
-              elif min(indices.x) < 0 or min(indices.y) < 0 or max(indices.x) > nx or max(indices.y) > ny:
-                # point lies at the edge of the model area.
-                # no spatial interpolation is used.
-                v1 = wind_df.loc[t1,"vt"][ny-1-l,k]
-                u1 = wind_df.loc[t1,"ut"][ny-1-l,k]
-                v2 = wind_df.loc[t2,"vt"][ny-1-l,k]
-                u2 = wind_df.loc[t2,"ut"][ny-1-l,k]
-                hx1 = wind_df.loc[t1,"hx"][ny-1-l,k]
-                hx2 = wind_df.loc[t2,"hx"][ny-1-l,k]
-                ex1 = wind_df.loc[t1,"ex"][ny-1-l,k]
-                ex2 = wind_df.loc[t2,"ex"][ny-1-l,k]
-              elif (x == (k+0.5)*dx) & (y == (l+0.5)*dx):
-                # no interpoolation as trajectory is located in raster cells middle
-                v1 = wind_df.loc[t1,"vt"][ny-1-l,k]
-                u1 = wind_df.loc[t1,"ut"][ny-1-l,k]
-                v2 = wind_df.loc[t2,"vt"][ny-1-l,k]
-                u2 = wind_df.loc[t2,"ut"][ny-1-l,k]
-                hx1 = wind_df.loc[t1,"hx"][ny-1-l,k]
-                hx2 = wind_df.loc[t2,"hx"][ny-1-l,k]
-                ex1 = wind_df.loc[t1,"ex"][ny-1-l,k]
-                ex2 = wind_df.loc[t2,"ex"][ny-1-l,k]
-              else:
-                # spatial interpolation of 4 raster cells
-                # calculation of inverse distance weights
-                indices["x_koord"] = (indices.x+0.5)*dx
-                indices["y_koord"] = (indices.y+0.5)*dx
-                indices["Entfernung"] = ((x-indices.x_koord)**2+(y-indices.y_koord)**2)**0.5
-                indices["inverse_distance"] = indices.Entfernung**-p
-                indices["gewicht"] = indices.inverse_distance/sum(indices.inverse_distance)
-                # spatial Interpolation
-                v1 = 0
-                u1 = 0
-                v2 = 0
-                u2 = 0
-                hx1 = 0; hx2 = 0; ex1 = 0; ex2 = 0
-                for i in range(0,len(indices)):
-                  v1 = v1 + wind_df.loc[t1,"vt"][ny-1-indices.y[i],indices.x[i]] * indices.gewicht[i]
-                  u1 = u1 + wind_df.loc[t1,"ut"][ny-1-indices.y[i],indices.x[i]] * indices.gewicht[i]
-                  hx1 = hx1 + wind_df.loc[t1,"hx"][ny-1-indices.y[i],indices.x[i]] * indices.gewicht[i]
-                  ex1 = ex1 + wind_df.loc[t1,"ex"][ny-1-indices.y[i],indices.x[i]] * indices.gewicht[i]
-                  v2 = v2 + wind_df.loc[t2,"vt"][ny-1-indices.y[i],indices.x[i]] * indices.gewicht[i]
-                  u2 = u2 + wind_df.loc[t2,"ut"][ny-1-indices.y[i],indices.x[i]] * indices.gewicht[i]
-                  hx2 = hx2 + wind_df.loc[t2,"hx"][ny-1-indices.y[i],indices.x[i]] * indices.gewicht[i]
-                  ex2 = ex2 + wind_df.loc[t2,"ex"][ny-1-indices.y[i],indices.x[i]] * indices.gewicht[i]
-    
-              # calculate mean of timesteps used by KLAM_21 that are closest in simualtion time
-              # if fixed time step calculating mean of same time steps -> doesn't change time step
-              Zeitschritt = times[np.abs(times[:,1]-Zeit).argsort()[:2],0].min()
-    
-              g1 = (t2-Zeit)/(t2-t1)                                    # weight for data from iozeit 1
-              g2 = (Zeit-t1)/(t2-t1)                                    # weight for data from iozeit 2
-    
-              v = v1*g1+v2*g2                                           # calculate spatially and temporally interpolated
-              u = u1*g1+u2*g2                                           # values of the wind field and cold air layer
-              hx = hx1*g1+hx2*g2                                        # for current position
-              ex = ex1*g1+ex2*g2
-    
-              lu = Landuse.loc[ny-1-l,k]
-              x = x + Zeitschritt*u/100                                 # calculate new x-Position (divided by 100, because KLAM_21 in cm/s)
-              y = y + Zeitschritt*v/100                                 # calculate new y-Position
-              Zeit = Zeit + Zeitschritt
-              wind_list.append([u, v, Zeitschritt, g1, g2, t1, t2, ex, hx])
-              zeitxy_list.append([Zeit, x, y, lu])
-    
-            wind_list.append([np.nan]*9)
-            trajektorie = pd.DataFrame(np.column_stack((zeitxy_list, wind_list)), columns=["Zeit", "x", "y", "LU", "u", "v", "Zeitschritt", "g1", "g2", "t1", "t2", "ex", "hx"])
-            trajektorie["dt"] = round(trajektorie["Zeit"]-Startzeit[p_traj])
-            trajektorie["ws"] = ((trajektorie["u"]/100)**2+(trajektorie["v"]/100)**2)**0.5
-            if mgv == 1:
-              trajektorie.fillna(-55.55, inplace=True)
-            traj_list.append(trajektorie)                               # When all points of a trajectory are calculated, the whole dataframe is appended to this list
-    
-          # backward trajectory calculation
-          elif Startzeit[p_traj] > Endzeit[p_traj]:
-            while Zeit > Endzeit[p_traj]:                               # calculates coordinates until time is less than end time 
-              mgv = 0
-    
-              if Zeit < t1:                                             # if time is less than t1, t1 will become t2 and a new t1 is found
-                t1, t2 = iozeit.loc[(iozeit["zt"]<=Zeit)][-1:].zt.item(),iozeit.loc[(iozeit["zt"]>Zeit)][:1].zt.item()
-    
-              kf = x/dx   # x-index with decimal places
-              lf = y/dx   # y-index with decimal places
-              k = int(kf) # x-Index
-              l = int(lf) # y-Index
-              xdec = kf-k # x decimal place (for quadrants)
-              ydec = lf-l # y decimal place (for quadrants)
-    
-              # find quadrant of the raster cell where trajectory is "currently" and get raster cells indices for spatial interpolation
-              if xdec >= 0.5:
-                if ydec >= 0.5: indices = pd.DataFrame({"x":[k, k, k+1, k+1], "y":[l, l+1, l+1, l]}) # Q1
-                else: indices = pd.DataFrame({"x":[k, k, k+1, k+1], "y":[l, l-1, l-1, l]}) # Q4
-              else:
-                if ydec >= 0.5: indices = pd.DataFrame({"x":[k, k, k-1, k-1], "y":[l, l+1, l+1, l]}) # Q2
-                else: indices = pd.DataFrame({"x":[k, k, k-1, k-1], "y":[l, l-1, l-1, l]}) # Q3
-    
-              # spatial interpolation, if useful. Save spatially interpolated values for both times (earlier iozeit as 1, later as 2)
-              if x < 0 or y < 0  or x > nml["grid"]["nx"]*dx or y > nml["grid"]["ny"]*dx : # point is located outside model region
-                mgv = 1      # indicator for trajectory leaving model area
-                break
-              elif min(indices.x) < 0 or min(indices.y) < 0 or max(indices.x) > nx or max(indices.y) > ny:
-                # point lies at the edge of the model area.
-                # no spatial interpolation is used.
-                v1 = wind_df.loc[t1,"vt"][ny-1-l,k]
-                u1 = wind_df.loc[t1,"ut"][ny-1-l,k]
-                v2 = wind_df.loc[t2,"vt"][ny-1-l,k]
-                u2 = wind_df.loc[t2,"ut"][ny-1-l,k]
-                hx1 = wind_df.loc[t1,"hx"][ny-1-l,k]
-                hx2 = wind_df.loc[t2,"hx"][ny-1-l,k]
-                ex1 = wind_df.loc[t1,"ex"][ny-1-l,k]
-                ex2 = wind_df.loc[t2,"ex"][ny-1-l,k]
-              elif (x == (k+0.5)*dx) & (y == (l+0.5)*dx):
-                # no interpoolation as trajectory is located in raster cells middle
-                v1 = wind_df.loc[t1,"vt"][ny-1-l,k]
-                u1 = wind_df.loc[t1,"ut"][ny-1-l,k]
-                v2 = wind_df.loc[t2,"vt"][ny-1-l,k]
-                u2 = wind_df.loc[t2,"ut"][ny-1-l,k]
-                hx1 = wind_df.loc[t1,"hx"][ny-1-l,k]
-                hx2 = wind_df.loc[t2,"hx"][ny-1-l,k]
-                ex1 = wind_df.loc[t1,"ex"][ny-1-l,k]
-                ex2 = wind_df.loc[t2,"ex"][ny-1-l,k]
-              else:
-                # spatial interpolation of 4 raster cells
-                # calculation of inverse distance weights
-                indices["x_koord"] = (indices.x+0.5)*dx
-                indices["y_koord"] = (indices.y+0.5)*dx
-                indices["Entfernung"] = ((x-indices.x_koord)**2+(y-indices.y_koord)**2)**0.5
-                indices["inverse_distance"] = indices.Entfernung**-p
-                indices["gewicht"] = indices.inverse_distance/sum(indices.inverse_distance)
-                # spatial Interpolation
-                v1 = 0
-                u1 = 0
-                v2 = 0
-                u2 = 0
-                hx1 = 0; hx2 = 0; ex1 = 0; ex2 = 0
-                for i in range(0,len(indices)):
-                  v1 = v1 + wind_df.loc[t1,"vt"][ny-1-indices.y[i],indices.x[i]] * indices.gewicht[i]
-                  u1 = u1 + wind_df.loc[t1,"ut"][ny-1-indices.y[i],indices.x[i]] * indices.gewicht[i]
-                  hx1 = hx1 + wind_df.loc[t1,"hx"][ny-1-indices.y[i],indices.x[i]] * indices.gewicht[i]
-                  ex1 = ex1 + wind_df.loc[t1,"ex"][ny-1-indices.y[i],indices.x[i]] * indices.gewicht[i]
-                  v2 = v2 + wind_df.loc[t2,"vt"][ny-1-indices.y[i],indices.x[i]] * indices.gewicht[i]
-                  u2 = u2 + wind_df.loc[t2,"ut"][ny-1-indices.y[i],indices.x[i]] * indices.gewicht[i]
-                  hx2 = hx2 + wind_df.loc[t2,"hx"][ny-1-indices.y[i],indices.x[i]] * indices.gewicht[i]
-                  ex2 = ex2 + wind_df.loc[t2,"ex"][ny-1-indices.y[i],indices.x[i]] * indices.gewicht[i]
-    
-              # calculate mean of timesteps used by KLAM_21 that are closest in simualtion time
-              # if fixed time step calculating mean of same time steps -> doesn't change time step
-              Zeitschritt = times[np.abs(times[:,1]-Zeit).argsort()[:2],0].min()
-    
-              g1 = (t2-Zeit)/(t2-t1)                                    # weight for data from iozeit 1
-              g2 = (Zeit-t1)/(t2-t1)                                    # weight for data from iozeit 2
-    
-              v = v1*g1+v2*g2                                           # calculate spatially and temporally interpolated
-              u = u1*g1+u2*g2                                           # values of the wind field and cold air layer
-              hx = hx1*g1+hx2*g2                                        # for current position
-              ex = ex1*g1+ex2*g2
-    
-              lu = Landuse.loc[ny-1-l,k]
-              x = x - Zeitschritt*u/100                                 # calculate new x-Position (divided by 100, because KLAM_21 in cm/s)
-              y = y - Zeitschritt*v/100                                 # calculate new y-Position
-              Zeit = Zeit - Zeitschritt
-              wind_list.append([u, v, Zeitschritt, g1, g2, t1, t2, ex, hx])
-              zeitxy_list.append([Zeit, x, y, lu])
-    
-            wind_list.append([np.nan]*9)
-            trajektorie = pd.DataFrame(np.column_stack((zeitxy_list, wind_list)), columns=["Zeit", "x", "y", "LU", "u", "v", "Zeitschritt", "g1", "g2", "t1", "t2", "ex", "hx"])
-            trajektorie["dt"] = round(Startzeit[p_traj]-trajektorie["Zeit"])
-            trajektorie["ws"] = ((trajektorie["u"]/100)**2+(trajektorie["v"]/100)**2)**0.5
-            if mgv == 1:
-              trajektorie.fillna(-55.55, inplace=True)
-            traj_list.append(trajektorie)                                # When all points of a trajectory are calculated, the whole dataframe is appended to this list
-    
-        print("Trajectory calculation took so long: ", datetime.now()-now)
-        now = datetime.now()
-        #################################################################################
-        # Saving the trajectories
-    
-        if "KLAM" in out_format:
-          for i in range(0, len(traj_list)):   # loop over all calculated trajectories
-            # get data frame from traj_list
-            trajek = traj_list[i].copy()
-            trajek["lahm"] = trajek.ws < ws_th      # find times where wind speed is smaller than the wind speed treshold
-            trajek["summe"] = trajek.dt             
-            # cumulative sum of time steps where wind speed is less than the treshold
-            trajek["summe"] = trajek["summe"].sub(trajek["summe"].mask(trajek.lahm).ffill().fillna(0)).astype(int) 
-            trajek["lahmer"] = trajek.ws.diff() < 0    # find decreasing wind speeds
-            trajek["summe1"] = trajek.summe
-            # cumulative sum of time steps where wind speed is less than treshold and decreasing
-            trajek["summe1"] = trajek["summe1"].sub(trajek["summe1"].mask(trajek.lahmer).ffill().fillna(0)).astype(int)
-            # cut trajectory if th_time is met or exceeded by cumulative sum of time steps where decreasing wind speed is less than treshold
-            if max(trajek.summe1) >= th_time:
-              ind_drop = trajek.loc[trajek.summe1>=th_time,"summe1"].index[0]
-              trajekt = trajek.loc[:ind_drop,:"ws"]
-              trajekt.loc[ind_drop,["u","v","ws","ex","hx","Zeitschritt"]] = [-1111,-1111,-11.11,-111.1,-111.1,-11.11]
-            else: 
-              trajekt = trajek.loc[:,:"ws"]
-            # create data frame with trajectory starting point, values around every dt seconds and last calculated position (or last position before trajectory was cut 
-            # because of wind speed)
-            test = pd.DataFrame(trajekt.loc[trajekt.index==0])
-            if Startzeit[i] < Endzeit[i]:
-              for dti in range(dt+int(test.loc[0,"Zeit"]),int(test.loc[0,"Zeit"])+int(max(trajekt.dt)),dt):
-                test = pd.concat([test, trajekt.loc[np.argsort(np.argsort(round(abs(trajekt['Zeit']-dti))))==0]])
+                  test.loc[q,"Überwärmungsgebiet"] = "ob"
+          else: 
+            test["Überwärmungsgebiet"] = "nc"
+          
+          # spatial join of cold air production areas with temporally first position of trajectory (written for every output position)
+          if "Quellgebiete" in in_nml["input"]:
+            geometry = [Point(test.loc[test.Zeit==min(test.Zeit),"x"]+xlu, test.loc[test.Zeit==min(test.Zeit),"y"]+ylu)]
+            quell = gpd.GeoDataFrame(geometry=geometry, crs=in_nml["input"]["koord_system"])
+            gebiet = gpd.sjoin(quellgebiet, quell, "right", "contains")
+            if len(gebiet[name_quell].values) > 0:
+              test["Quellgebiet"] = gebiet[name_quell].values[0]
             else:
-              for dti in range(int(test.loc[0,"Zeit"])-dt,int(test.loc[0,"Zeit"])-int(max(trajekt.dt)),-dt):
-                test = pd.concat([test, trajekt.loc[np.argsort(np.argsort(round(abs(trajekt['Zeit']-dti))))==0]])
-            test = pd.concat([test,  trajekt.loc[trajekt.index==max(trajekt.index)]], ignore_index=True)
-            test = test.drop_duplicates()                # if there are duplicate rows the duplicate is dropped.
-            
-            # spatial join of warm target areas with every output position, if wanted
-            if "Ueberwaermungsgebiete" in in_nml["input"]:
-              for q in range(len(test)):
-                geometry = [Point(test.loc[q,"x"]+xlu, test.loc[q,"y"]+ylu)]
-                stbz = gpd.GeoDataFrame(geometry=geometry, crs=in_nml["input"]["koord_system"])
-                bezirk = gpd.sjoin(umriss, stbz, "inner", "contains")
-                if len(bezirk[name_warm].values) > 0:        
-                    test.loc[q,"Überwärmungsgebiet"] = bezirk[name_warm].values[0]
+              test["Quellgebiet"] = "ob"
+          else:
+            test["Quellgebiet"] = "nc"
+          
+          # if trajectories are divided in multiple segments with different colors every 30 minutes in the KLAM_21 compatible output, this happens here 
+          if in_nml["output"]["Farbverlauf_mit_Zeit"] == True:
+            zeiten = pd.DataFrame({"zeit":[1800*n for n in range(1,int(iozeit.zt[len(iozeit)-1]/1800+1))], 
+            "vw_farbe":list(range(farbe[0],farbe[0]+10))+list(range(farbe[0],farbe[0]+6)), 
+            "rw_farbe":list(range(farbe[1]+9,farbe[1]-1, -1))+list(range(farbe[1]+9,farbe[1]+3,-1))}) # data frame with all output times and backwards and forwards colours
+            if Startzeit[i] < Endzeit[i]:                                                             # if forward trajectory
+              zeiten = zeiten[(zeiten.zeit >= min(test.Zeit)) & (zeiten.zeit <= max(test.Zeit)+1800)] # + 1800 to account for positions between ending time and next half hour
+              zeiten.reset_index(inplace=True, drop=True)                                             # take only rows for needed times from previous created dataframe
+              for n in range(0, len(zeiten.zeit)):                                                    
+                # cut trajectory into 30 minute intervals and print those as different lines to KLAM_21 compatible file
+                if n == 0:
+                  test1 = test[test.Zeit < zeiten.zeit[n]]
+                  test1 = pd.concat([test1,test.loc[np.argsort(np.argsort(round(abs(test['Zeit']-zeiten.zeit[n]))))==0]])
+                elif n == len(zeiten.zeit)-1:
+                  test1 = test.loc[np.argsort(np.argsort(round(abs(test['Zeit']-zeiten.zeit[n-1]))))==0]
+                  test1 = pd.concat([test1,test[test.Zeit > zeiten.zeit[n-1]]])
                 else:
-                    test.loc[q,"Überwärmungsgebiet"] = "ob"
-            else: 
-              test["Überwärmungsgebiet"] = "nc"
-            
-            # spatial join of cold air production areas with temporally first position of trajectory (written for every output position)
-            if "Quellgebiete" in in_nml["input"]:
-              geometry = [Point(test.loc[test.Zeit==min(test.Zeit),"x"]+xlu, test.loc[test.Zeit==min(test.Zeit),"y"]+ylu)]
-              quell = gpd.GeoDataFrame(geometry=geometry, crs=in_nml["input"]["koord_system"])
-              gebiet = gpd.sjoin(quellgebiet, quell, "right", "contains")
-              if len(gebiet[name_quell].values) > 0:
-                test["Quellgebiet"] = gebiet[name_quell].values[0]
-              else:
-                test["Quellgebiet"] = "ob"
-            else:
-              test["Quellgebiet"] = "nc"
-            
-            # if trajectories are divided in multiple segments with different colors every 30 minutes in the KLAM_21 compatible output, this happens here 
-            if in_nml["output"]["Farbverlauf_mit_Zeit"] == True:
-              zeiten = pd.DataFrame({"zeit":[1800*n for n in range(1,int(iozeit.zt[len(iozeit)-1]/1800+1))], 
-              "vw_farbe":list(range(farbe[0],farbe[0]+10))+list(range(farbe[0],farbe[0]+6)), 
-              "rw_farbe":list(range(farbe[1]+9,farbe[1]-1, -1))+list(range(farbe[1]+9,farbe[1]+3,-1))}) # data frame with all output times and backwards and forwards colours
-              if Startzeit[i] < Endzeit[i]:                                                             # if forward trajectory
-                zeiten = zeiten[(zeiten.zeit >= min(test.Zeit)) & (zeiten.zeit <= max(test.Zeit)+1800)] # + 1800 to account for positions between ending time and next half hour
-                zeiten.reset_index(inplace=True, drop=True)                                             # take only rows for needed times from previous created dataframe
-                for n in range(0, len(zeiten.zeit)):                                                    
-                  # cut trajectory into 30 minute intervals and print those as different lines to KLAM_21 compatible file
-                  if n == 0:
-                    test1 = test[test.Zeit < zeiten.zeit[n]]
-                    test1 = pd.concat([test1,test.loc[np.argsort(np.argsort(round(abs(test['Zeit']-zeiten.zeit[n]))))==0]])
-                  elif n == len(zeiten.zeit)-1:
-                    test1 = test.loc[np.argsort(np.argsort(round(abs(test['Zeit']-zeiten.zeit[n-1]))))==0]
-                    test1 = pd.concat([test1,test[test.Zeit > zeiten.zeit[n-1]]])
-                  else:
-                    test1 = test.loc[np.argsort(np.argsort(round(abs(test['Zeit']-zeiten.zeit[n-1]))))==0]
-                    test1 = pd.concat([test1,test[(test.Zeit > zeiten.zeit[n-1]) & (test.Zeit < zeiten.zeit[n])]])
-                    test1 = pd.concat([test1,test.loc[np.argsort(np.argsort(round(abs(test['Zeit']-zeiten.zeit[n]))))==0]])
-                  test1.drop_duplicates(inplace=True)
-                  # add more information as columns
-                  test1["*lintyp"] = lintyp       # line style
-                  test1["s"] = strichdicke        # line width
-                  test1["x"] = test1.x+xlu        # convert to absolute coordinates
-                  test1["y"] = test1.y+ylu        # convert to absolute coordinates
-                  test1["Nr"] = i+1               # enumerate to know which parts belong together 
-                  test1["u"] = test1.u/100        # convert to m s⁻¹
-                  test1["v"] = test1.v/100        # convert to m s⁻¹
-                  test1["ex"] = test1.ex/10       # convert to kJ/m²
-                  test1["hx"] = test1.hx/10       # convert to m
-                  test1 = test1.round({"x":2,"y":2, "u":2, "v":2, "ws":2, "Zeitschritt":2, "Zeit":2, "hx":2, "ex":2})
-                  test1["LU"] = test1.LU.astype(int)
-                  test1.loc[:,["Quellgebiet","Überwärmungsgebiet"]] = test1.loc[:,["Quellgebiet","Überwärmungsgebiet"]].fillna("ob")
-                  test1.fillna(-99.99,inplace=True)
-                  if Startzeit[i] < Endzeit[i]:
-                    test1["icolor"] = zeiten.vw_farbe[n]
-                  else:
-                    test1["icolor"] = zeiten.rw_farbe[n]
-                  if (i == 0) & (n == 0):
-                    f = open(out_file_name+out_ext, 'w')
-                    writer = csv.writer(f)
-                    writer.writerow(["*"+nml["output"]["commres"]])
-                    writer.writerow(["*coordinate system: "+in_nml["input"]["koord_system"]])
-                    f.writelines(["*u and v in m/s"+"\n", "*ex in kJ/m²"+"\n", "*hx in m\n"])
-                    test1.loc[:,["*lintyp","icolor","x","y","s","Nr","Zeit","u","v","ws","ex","hx", "Zeitschritt", "LU","Überwärmungsgebiet","Quellgebiet"]].to_csv(f,header=True, index=False, sep=" ")
-                    f.close()
-                  elif (i == len(traj_list)-1) & (n == len(zeiten.zeit)-1):                 # if last part of last trajectory print also 999 to show end of file 
-                    f = open(out_file_name+out_ext, 'a')
-                    writer = csv.writer(f)
-                    writer.writerow([99])
-                    test1.loc[:,["*lintyp","icolor","x","y","s","Nr","Zeit","u","v","ws","ex","hx", "Zeitschritt", "LU","Überwärmungsgebiet","Quellgebiet"]].to_csv(f, header=False, sep=" ", index=False)
-                    writer.writerow([99])
-                    writer.writerow([999])
-                    f.close()
-                  else:
-                    f = open(out_file_name+out_ext, 'a')
-                    writer = csv.writer(f)
-                    writer.writerow([99])
-                    test1.loc[:,["*lintyp","icolor","x","y","s","Nr","Zeit","u","v","ws","ex","hx", "Zeitschritt", "LU","Überwärmungsgebiet","Quellgebiet"]].to_csv(f, header=False, sep=" ", index=False)
-                    f.close()
-              else:                   # same for backward trajectory
-                zeiten = zeiten[(zeiten.zeit <= max(test.Zeit)+1800) & (zeiten.zeit >= min(test.Zeit))]   # + 1800 to account for positions between ending time and next half hour
-                zeiten.reset_index(inplace=True, drop=True)
-                for n in range(len(zeiten.zeit)-1,-1,-1):
-                  if n == 0:
-                    test1 = test.loc[np.argsort(np.argsort(round(abs(test['Zeit']-zeiten.zeit[n]))))==0]
-                    test1 = pd.concat([test1,test[test.Zeit < zeiten.zeit[n]]])
-                  elif n == len(zeiten.zeit)-1:
-                    test1 = test[test.Zeit > zeiten.zeit[n-1]]
-                    test1 = pd.concat([test1,test.loc[np.argsort(np.argsort(round(abs(test['Zeit']-zeiten.zeit[n-1]))))==0]])
-                  else:
-                    test1 = test.loc[np.argsort(np.argsort(round(abs(test['Zeit']-zeiten.zeit[n]))))==0]
-                    test1 = pd.concat([test1,test[(test.Zeit > zeiten.zeit[n-1]) & (test.Zeit < zeiten.zeit[n])]])
-                    test1 = pd.concat([test1,test.loc[np.argsort(np.argsort(round(abs(test['Zeit']-zeiten.zeit[n-1]))))==0]])
-                  test1.drop_duplicates(inplace=True)
-                  test1["*lintyp"] = lintyp       # line style
-                  test1["s"] = strichdicke        # line width
-                  test1["x"] = test1.x+xlu        # convert to absolute coordinates
-                  test1["y"] = test1.y+ylu        # convert to absolute coordinates
-                  test1["Nr"] = i+1               # enumerate to know which parts belong together 
-                  test1["u"] = test1.u/100        # convert to m s⁻¹
-                  test1["v"] = test1.v/100        # convert to m s⁻¹
-                  test1["ex"] = test1.ex/10       # convert to kJ/m²
-                  test1["hx"] = test1.hx/10       # convert to m
-                  test1 = test1.round({"x":2,"y":2, "u":2, "v":2,"ws":2, "Zeitschritt":2, "Zeit":2, "hx":2, "ex":2})
-                  test1["LU"] = test1.LU.astype(int)
-                  test1.loc[:,["Quellgebiet","Überwärmungsgebiet"]] = test1.loc[:,["Quellgebiet","Überwärmungsgebiet"]].fillna("ob")
-                  test1.fillna(-99.99,inplace=True)                     # fill na values
-                  if Startzeit[i] < Endzeit[i]:
-                    test1["icolor"] = zeiten.vw_farbe[n]
-                  else:
-                    test1["icolor"] = zeiten.rw_farbe[n]
-                  if (i == 0) & (n == len(zeiten.zeit)-1):
-                    f = open(out_file_name+out_ext, 'w')
-                    writer = csv.writer(f)
-                    writer.writerow(["*"+nml["output"]["commres"]])
-                    writer.writerow(["*coordinate system: "+in_nml["input"]["koord_system"]])
-                    f.writelines(["*u and v in m/s"+"\n", "*ex in kJ/m²"+"\n", "*hx in m\n"])
-                    test1.loc[:,["*lintyp","icolor","x","y","s","Nr","Zeit","u","v","ws","ex","hx", "Zeitschritt", "LU","Überwärmungsgebiet","Quellgebiet"]].to_csv(f,header=True, index=False, sep=" ")
-                    f.close()
-                  elif (i == len(traj_list)-1) & (n == 0):
-                    f = open(out_file_name+out_ext, 'a')
-                    writer = csv.writer(f)
-                    writer.writerow([99])
-                    test1.loc[:,["*lintyp","icolor","x","y","s","Nr","Zeit","u","v","ws","ex","hx", "Zeitschritt", "LU","Überwärmungsgebiet","Quellgebiet"]].to_csv(f, header=False, sep=" ", index=False)
-                    writer.writerow([99])
-                    writer.writerow([999])
-                    f.close()
-                  else:
-                    f = open(out_file_name+out_ext, 'a')
-                    writer = csv.writer(f)
-                    writer.writerow([99])
-                    test1.loc[:,["*lintyp","icolor","x","y","s","Nr","Zeit","u","v","ws","ex","hx", "Zeitschritt", "LU","Überwärmungsgebiet","Quellgebiet"]].to_csv(f, header=False, sep=" ", index=False)
-                    f.close()
-            
-            else:                   # if time should not be displayed by colour in KLAM_21 GUI
-              if test.Zeit.iloc[0] > test.Zeit.iloc[-1]:
-                test["icolor"] = farbe[0]                 # forward colour is normally blue
-              else: 
-                test["icolor"] = farbe[1]                 # backward colour is normally red
-              test["x"] = test.x + xlu       # convert to absolute coordinates
-              test["y"] = test.y + ylu       # convert to absolute coordinates
-              test["*lintyp"] = lintyp       # line style
-              test["s"] = strichdicke        # line width
-              test["Nr"] = i+1               # enumerate to know which parts belong together
-              test["u"] = test.u/100         # convert to m s⁻¹
-              test["v"] = test.v/100         # convert to m s⁻¹
-              test["ex"] = test.ex/10        # convert to kJ/m
-              test["hx"] = test.hx/10        # convert to m
-              test = test.round({"x":2,"y":2, "u":2, "v":2, "ws":2, "Zeitschritt":2, "Zeit":2, "hx":2, "ex":2})
-              test["LU"] = test.LU.astype(int)
-              test.loc[:,["Quellgebiet","Überwärmungsgebiet"]] = test.loc[:,["Quellgebiet","Überwärmungsgebiet"]].fillna("ob")
-              test.fillna(-99.99,inplace=True)
-              if i == 0:
-                f = open(out_file_name+out_ext, 'w')
-                writer = csv.writer(f)
-                writer.writerow(["*"+nml["output"]["commres"]])
-                writer.writerow(["*coordinate system: "+in_nml["input"]["koord_system"]])
-                f.writelines(["*u and v in m/s"+"\n", "*ex in kJ/m²"+"\n", "*hx in m\n"])
-                test.loc[:,["*lintyp","icolor","x","y","s","Nr","Zeit","u","v","ws","ex","hx", "Zeitschritt", "LU","Überwärmungsgebiet","Quellgebiet"]].to_csv(f,header=True, index=False, sep=" ")
-                f.close()
-              elif i == len(traj_list)-1:
-                f = open(out_file_name+out_ext, 'a')
-                writer = csv.writer(f)
-                writer.writerow([99])
-                test.loc[:,["*lintyp","icolor","x","y","s","Nr","Zeit","u","v","ws","ex","hx", "Zeitschritt", "LU","Überwärmungsgebiet","Quellgebiet"]].to_csv(f, header=False, sep=" ", index=False)
-                writer.writerow([99])
-                writer.writerow([999])
-                f.close()
-              else:
-                f = open(out_file_name+out_ext, 'a')
-                writer = csv.writer(f)
-                writer.writerow([99])
-                test.loc[:,["*lintyp","icolor","x","y","s","Nr","Zeit","u","v","ws","ex","hx", "Zeitschritt", "LU","Überwärmungsgebiet","Quellgebiet"]].to_csv(f, header=False, sep=" ", index=False)
-                f.close()
-          print("Trajectories were saved as KLAM_21 compatible files.")
-        
-        if "geojson" in out_format:                                       # if geojson output wanted
-          lines_df = pd.DataFrame({"geometry":[], "Nr":[], "x_start":[], "y_start":[], "t_start":[], "t_end":[], "Überwärmungsgebiet":[], "Quellgebiet":[]}) 
-          points_df = pd.DataFrame()                                      # create empty data frames for output as lines and as points
-          geom = []
-          for i in range(0, len(traj_list)):   # loop over all calculated trajectories
-            # get data frame from traj_list
-            trajek = traj_list[i].copy()
-            trajek["lahm"] = trajek.ws < ws_th      # find times where wind speed is smaller than the wind speed treshold
-            trajek["summe"] = trajek.dt             
-            # cumulative sum of time steps where wind speed is less than the treshold
-            trajek["summe"] = trajek["summe"].sub(trajek["summe"].mask(trajek.lahm).ffill().fillna(0)).astype(int) 
-            trajek["lahmer"] = trajek.ws.diff() < 0    # find decreasing wind speeds
-            trajek["summe1"] = trajek.summe
-            # cumulative sum of time steps where wind speed is less than treshold and decreasing
-            trajek["summe1"] = trajek["summe1"].sub(trajek["summe1"].mask(trajek.lahmer).ffill().fillna(0)).astype(int)
-            # cut trajectory if th_time is met or exceeded by cumulative sum of time steps where decreasing wind speed is less than treshold
-            if max(trajek.summe1) >= th_time:
-              ind_drop = trajek.loc[trajek.summe1>=th_time,"summe1"].index[0]
-              trajekt = trajek.loc[:ind_drop,:"ws"]
-              trajekt.loc[ind_drop,["u","v","ws","ex","hx","Zeitschritt"]] = [-1111,-1111,-11.11,-111.1,-111.1,-11.11]
-            else: 
-              trajekt = trajek.loc[:,:"ws"]
-            # create data frame with trajectory starting point, values around every dt seconds and last calculated position (or last position before trajectory was cut 
-            # because of wind speed)
-            test = pd.DataFrame(trajekt.loc[trajekt.index==0])
-            if Startzeit[i] < Endzeit[i]:
-              for dti in range(dt+int(test.loc[0,"Zeit"]),int(test.loc[0,"Zeit"])+int(max(trajekt.dt)),dt):
-                test = pd.concat([test, trajekt.loc[np.argsort(np.argsort(round(abs(trajekt['Zeit']-dti))))==0]])
-            else:
-              for dti in range(int(test.loc[0,"Zeit"])-dt,int(test.loc[0,"Zeit"])-int(max(trajekt.dt)),-dt):
-                test = pd.concat([test, trajekt.loc[np.argsort(np.argsort(round(abs(trajekt['Zeit']-dti))))==0]])
-            test = pd.concat([test,  trajekt.loc[trajekt.index==max(trajekt.index)]], ignore_index=True)
-            test = test.drop_duplicates()                # if there are duplicate rows the duplicate is dropped.
-            
-            # spatial join of warm target areas with every output position, if wanted
-            if "Ueberwaermungsgebiete" in in_nml["input"]:
-              for q in range(len(test)):
-                geometry = [Point(test.loc[q,"x"]+xlu, test.loc[q,"y"]+ylu)]
-                stbz = gpd.GeoDataFrame(geometry=geometry, crs=in_nml["input"]["koord_system"])
-                bezirk = gpd.sjoin(umriss, stbz, "inner", "contains")
-                if len(bezirk[name_warm].values) > 0:        
-                    test.loc[q,"Überwärmungsgebiet"] = bezirk[name_warm].values[0]
+                  test1 = test.loc[np.argsort(np.argsort(round(abs(test['Zeit']-zeiten.zeit[n-1]))))==0]
+                  test1 = pd.concat([test1,test[(test.Zeit > zeiten.zeit[n-1]) & (test.Zeit < zeiten.zeit[n])]])
+                  test1 = pd.concat([test1,test.loc[np.argsort(np.argsort(round(abs(test['Zeit']-zeiten.zeit[n]))))==0]])
+                test1.drop_duplicates(inplace=True)
+                # add more information as columns
+                test1["*lintyp"] = lintyp       # line style
+                test1["s"] = strichdicke        # line width
+                test1["x"] = test1.x+xlu        # convert to absolute coordinates
+                test1["y"] = test1.y+ylu        # convert to absolute coordinates
+                test1["Nr"] = i+1               # enumerate to know which parts belong together 
+                test1["u"] = test1.u/100        # convert to m s⁻¹
+                test1["v"] = test1.v/100        # convert to m s⁻¹
+                test1["ex"] = test1.ex/10       # convert to kJ/m²
+                test1["hx"] = test1.hx/10       # convert to m
+                test1 = test1.round({"x":2,"y":2, "u":2, "v":2, "ws":2, "Zeitschritt":2, "Zeit":2, "hx":2, "ex":2})
+                test1["LU"] = test1.LU.astype(int)
+                test1.loc[:,["Quellgebiet","Überwärmungsgebiet"]] = test1.loc[:,["Quellgebiet","Überwärmungsgebiet"]].fillna("ob")
+                test1.fillna(-99.99,inplace=True)
+                if Startzeit[i] < Endzeit[i]:
+                  test1["icolor"] = zeiten.vw_farbe[n]
                 else:
-                    test.loc[q,"Überwärmungsgebiet"] = "ob"
+                  test1["icolor"] = zeiten.rw_farbe[n]
+                if (i == 0) & (n == 0):
+                  f = open(out_file_name+out_ext, 'w')
+                  writer = csv.writer(f)
+                  writer.writerow(["*"+nml["output"]["commres"]])
+                  writer.writerow(["*coordinate system: "+in_nml["input"]["koord_system"]])
+                  f.writelines(["*u and v in m/s"+"\n", "*ex in kJ/m²"+"\n", "*hx in m\n"])
+                  test1.loc[:,["*lintyp","icolor","x","y","s","Nr","Zeit","u","v","ws","ex","hx", "Zeitschritt", "LU","Überwärmungsgebiet","Quellgebiet"]].to_csv(f,header=True, index=False, sep=" ")
+                  f.close()
+                elif (i == len(traj_list)-1) & (n == len(zeiten.zeit)-1):                 # if last part of last trajectory print also 999 to show end of file 
+                  f = open(out_file_name+out_ext, 'a')
+                  writer = csv.writer(f)
+                  writer.writerow([99])
+                  test1.loc[:,["*lintyp","icolor","x","y","s","Nr","Zeit","u","v","ws","ex","hx", "Zeitschritt", "LU","Überwärmungsgebiet","Quellgebiet"]].to_csv(f, header=False, sep=" ", index=False)
+                  writer.writerow([99])
+                  writer.writerow([999])
+                  f.close()
+                else:
+                  f = open(out_file_name+out_ext, 'a')
+                  writer = csv.writer(f)
+                  writer.writerow([99])
+                  test1.loc[:,["*lintyp","icolor","x","y","s","Nr","Zeit","u","v","ws","ex","hx", "Zeitschritt", "LU","Überwärmungsgebiet","Quellgebiet"]].to_csv(f, header=False, sep=" ", index=False)
+                  f.close()
+            else:                   # same for backward trajectory
+              zeiten = zeiten[(zeiten.zeit <= max(test.Zeit)+1800) & (zeiten.zeit >= min(test.Zeit))]   # + 1800 to account for positions between ending time and next half hour
+              zeiten.reset_index(inplace=True, drop=True)
+              for n in range(len(zeiten.zeit)-1,-1,-1):
+                if n == 0:
+                  test1 = test.loc[np.argsort(np.argsort(round(abs(test['Zeit']-zeiten.zeit[n]))))==0]
+                  test1 = pd.concat([test1,test[test.Zeit < zeiten.zeit[n]]])
+                elif n == len(zeiten.zeit)-1:
+                  test1 = test[test.Zeit > zeiten.zeit[n-1]]
+                  test1 = pd.concat([test1,test.loc[np.argsort(np.argsort(round(abs(test['Zeit']-zeiten.zeit[n-1]))))==0]])
+                else:
+                  test1 = test.loc[np.argsort(np.argsort(round(abs(test['Zeit']-zeiten.zeit[n]))))==0]
+                  test1 = pd.concat([test1,test[(test.Zeit > zeiten.zeit[n-1]) & (test.Zeit < zeiten.zeit[n])]])
+                  test1 = pd.concat([test1,test.loc[np.argsort(np.argsort(round(abs(test['Zeit']-zeiten.zeit[n-1]))))==0]])
+                test1.drop_duplicates(inplace=True)
+                test1["*lintyp"] = lintyp       # line style
+                test1["s"] = strichdicke        # line width
+                test1["x"] = test1.x+xlu        # convert to absolute coordinates
+                test1["y"] = test1.y+ylu        # convert to absolute coordinates
+                test1["Nr"] = i+1               # enumerate to know which parts belong together 
+                test1["u"] = test1.u/100        # convert to m s⁻¹
+                test1["v"] = test1.v/100        # convert to m s⁻¹
+                test1["ex"] = test1.ex/10       # convert to kJ/m²
+                test1["hx"] = test1.hx/10       # convert to m
+                test1 = test1.round({"x":2,"y":2, "u":2, "v":2,"ws":2, "Zeitschritt":2, "Zeit":2, "hx":2, "ex":2})
+                test1["LU"] = test1.LU.astype(int)
+                test1.loc[:,["Quellgebiet","Überwärmungsgebiet"]] = test1.loc[:,["Quellgebiet","Überwärmungsgebiet"]].fillna("ob")
+                test1.fillna(-99.99,inplace=True)                     # fill na values
+                if Startzeit[i] < Endzeit[i]:
+                  test1["icolor"] = zeiten.vw_farbe[n]
+                else:
+                  test1["icolor"] = zeiten.rw_farbe[n]
+                if (i == 0) & (n == len(zeiten.zeit)-1):
+                  f = open(out_file_name+out_ext, 'w')
+                  writer = csv.writer(f)
+                  writer.writerow(["*"+nml["output"]["commres"]])
+                  writer.writerow(["*coordinate system: "+in_nml["input"]["koord_system"]])
+                  f.writelines(["*u and v in m/s"+"\n", "*ex in kJ/m²"+"\n", "*hx in m\n"])
+                  test1.loc[:,["*lintyp","icolor","x","y","s","Nr","Zeit","u","v","ws","ex","hx", "Zeitschritt", "LU","Überwärmungsgebiet","Quellgebiet"]].to_csv(f,header=True, index=False, sep=" ")
+                  f.close()
+                elif (i == len(traj_list)-1) & (n == 0):
+                  f = open(out_file_name+out_ext, 'a')
+                  writer = csv.writer(f)
+                  writer.writerow([99])
+                  test1.loc[:,["*lintyp","icolor","x","y","s","Nr","Zeit","u","v","ws","ex","hx", "Zeitschritt", "LU","Überwärmungsgebiet","Quellgebiet"]].to_csv(f, header=False, sep=" ", index=False)
+                  writer.writerow([99])
+                  writer.writerow([999])
+                  f.close()
+                else:
+                  f = open(out_file_name+out_ext, 'a')
+                  writer = csv.writer(f)
+                  writer.writerow([99])
+                  test1.loc[:,["*lintyp","icolor","x","y","s","Nr","Zeit","u","v","ws","ex","hx", "Zeitschritt", "LU","Überwärmungsgebiet","Quellgebiet"]].to_csv(f, header=False, sep=" ", index=False)
+                  f.close()
+          
+          else:                   # if time should not be displayed by colour in KLAM_21 GUI
+            if test.Zeit.iloc[0] > test.Zeit.iloc[-1]:
+              test["icolor"] = farbe[0]                 # forward colour is normally blue
             else: 
-              test["Überwärmungsgebiet"] = "nc"
-            
-            # spatial join of cold air production areas with temporally first position of trajectory (written for every output position)
-            if "Quellgebiete" in in_nml["input"]:
-              geometry = [Point(test.loc[test.Zeit==min(test.Zeit),"x"]+xlu, test.loc[test.Zeit==min(test.Zeit),"y"]+ylu)]
-              quell = gpd.GeoDataFrame(geometry=geometry, crs=in_nml["input"]["koord_system"])
-              gebiet = gpd.sjoin(quellgebiet, quell, "right", "contains")
-              if len(gebiet[name_quell].values) > 0:
-                test["Quellgebiet"] = gebiet[name_quell].values[0]
-              else:
-                test["Quellgebiet"] = "ob"
+              test["icolor"] = farbe[1]                 # backward colour is normally red
+            test["x"] = test.x + xlu       # convert to absolute coordinates
+            test["y"] = test.y + ylu       # convert to absolute coordinates
+            test["*lintyp"] = lintyp       # line style
+            test["s"] = strichdicke        # line width
+            test["Nr"] = i+1               # enumerate to know which parts belong together
+            test["u"] = test.u/100         # convert to m s⁻¹
+            test["v"] = test.v/100         # convert to m s⁻¹
+            test["ex"] = test.ex/10        # convert to kJ/m
+            test["hx"] = test.hx/10        # convert to m
+            test = test.round({"x":2,"y":2, "u":2, "v":2, "ws":2, "Zeitschritt":2, "Zeit":2, "hx":2, "ex":2})
+            test["LU"] = test.LU.astype(int)
+            test.loc[:,["Quellgebiet","Überwärmungsgebiet"]] = test.loc[:,["Quellgebiet","Überwärmungsgebiet"]].fillna("ob")
+            test.fillna(-99.99,inplace=True)
+            if i == 0:
+              f = open(out_file_name+out_ext, 'w')
+              writer = csv.writer(f)
+              writer.writerow(["*"+nml["output"]["commres"]])
+              writer.writerow(["*coordinate system: "+in_nml["input"]["koord_system"]])
+              f.writelines(["*u and v in m/s"+"\n", "*ex in kJ/m²"+"\n", "*hx in m\n"])
+              test.loc[:,["*lintyp","icolor","x","y","s","Nr","Zeit","u","v","ws","ex","hx", "Zeitschritt", "LU","Überwärmungsgebiet","Quellgebiet"]].to_csv(f,header=True, index=False, sep=" ")
+              f.close()
+            elif i == len(traj_list)-1:
+              f = open(out_file_name+out_ext, 'a')
+              writer = csv.writer(f)
+              writer.writerow([99])
+              test.loc[:,["*lintyp","icolor","x","y","s","Nr","Zeit","u","v","ws","ex","hx", "Zeitschritt", "LU","Überwärmungsgebiet","Quellgebiet"]].to_csv(f, header=False, sep=" ", index=False)
+              writer.writerow([99])
+              writer.writerow([999])
+              f.close()
             else:
-              test["Quellgebiet"] = "nc"
-            line = list(zip(round(test.x+xlu,2), round(test.y+ylu,2)))
-            geom.append(LineString(line))
-            lines_df.loc[i,"Nr":] = [i+1, test.x[0], test.y[0], test.Zeit[0], round(test.Zeit[max(test.index)],2), test.Überwärmungsgebiet[0], test.Quellgebiet[0]] #
-            test["Nr"] = i+1
-            points_df = pd.concat([points_df,test], ignore_index=True)
-          lines_gdf = gpd.GeoDataFrame(lines_df, crs=in_nml["input"]["koord_system"], geometry = geom)
-          # with open(directory+in_nml["output"]["out_dir"]+out_file+str(start_ein)+"_"+str(end_ein)+"_LU"+str(lu_start)+"_LS.geojson", "w") as file:
-          #   file.write(lines_gdf.to_json())                                     # alternative for saving
-          lines_gdf.to_file(out_file_name+"_LS.geojson")                          # save trajectories as Linestrings
-          points_df["x"] = points_df.x+xlu        # convert to absolute coordinates
-          points_df["y"] = points_df.y+ylu        # convert to absolute coordinates
-          points_df["u"] = points_df.u/100        # convert to m s⁻¹
-          points_df["v"] = points_df.v/100        # convert to m s⁻¹
-          points_df["ex"] = points_df.ex/10       # convert to kJ/m
-          points_df["hx"] = points_df.hx/10       # convert to m
-          points_df["geometry"] = points_df[["x", "y"]].apply(Point, axis=1)
-          points_df.loc[:,["Quellgebiet","Überwärmungsgebiet"]] = points_df.loc[:,["Quellgebiet","Überwärmungsgebiet"]].fillna("ob")
-          points_df.fillna(-99.99, inplace=True)
-          points_df = points_df.round(2)          # round to 2 decimal points
-          points_gdf = gpd.GeoDataFrame(points_df[["Nr", "x", "y", "Zeit","u", "v","ws", "ex", "hx", "Zeitschritt", "LU", "Überwärmungsgebiet", "Quellgebiet", "geometry"]], crs=in_nml["input"]["koord_system"], geometry="geometry")
-          points_gdf.to_file(out_file_name+"_P.geojson")                                                                                                # save as Points
-          # with open(directory+in_nml["output"]["out_dir"]+out_file+str(start_ein)+"_"+str(end_ein)+"_LU"+str(lu_start)+"_P.geojson", "w") as file:    # alternative way
-          #   file.write(points_gdf.to_json())                                                                                                          # to save as geojson
-          print("Trajectories saved as geoJSON LineStrings and Points.")
-    
-        print("Saving took so long: ", datetime.now()-now)
+              f = open(out_file_name+out_ext, 'a')
+              writer = csv.writer(f)
+              writer.writerow([99])
+              test.loc[:,["*lintyp","icolor","x","y","s","Nr","Zeit","u","v","ws","ex","hx", "Zeitschritt", "LU","Überwärmungsgebiet","Quellgebiet"]].to_csv(f, header=False, sep=" ", index=False)
+              f.close()
+        print("Trajectories were saved as KLAM_21 compatible files.")
+      
+      if "geojson" in out_format:                                       # if geojson output wanted
+        lines_df = pd.DataFrame({"geometry":[], "Nr":[], "x_start":[], "y_start":[], "t_start":[], "t_end":[], "Überwärmungsgebiet":[], "Quellgebiet":[]}) 
+        points_df = pd.DataFrame()                                      # create empty data frames for output as lines and as points
+        geom = []
+        for i in range(0, len(traj_list)):   # loop over all calculated trajectories
+          # get data frame from traj_list
+          trajek = traj_list[i].copy()
+          trajek["lahm"] = trajek.ws < ws_th      # find times where wind speed is smaller than the wind speed treshold
+          trajek["summe"] = trajek.dt             
+          # cumulative sum of time steps where wind speed is less than the treshold
+          trajek["summe"] = trajek["summe"].sub(trajek["summe"].mask(trajek.lahm).ffill().fillna(0)).astype(int) 
+          trajek["lahmer"] = trajek.ws.diff() < 0    # find decreasing wind speeds
+          trajek["summe1"] = trajek.summe
+          # cumulative sum of time steps where wind speed is less than treshold and decreasing
+          trajek["summe1"] = trajek["summe1"].sub(trajek["summe1"].mask(trajek.lahmer).ffill().fillna(0)).astype(int)
+          # cut trajectory if th_time is met or exceeded by cumulative sum of time steps where decreasing wind speed is less than treshold
+          if max(trajek.summe1) >= th_time:
+            ind_drop = trajek.loc[trajek.summe1>=th_time,"summe1"].index[0]
+            trajekt = trajek.loc[:ind_drop,:"ws"]
+            trajekt.loc[ind_drop,["u","v","ws","ex","hx","Zeitschritt"]] = [-1111,-1111,-11.11,-111.1,-111.1,-11.11]
+          else: 
+            trajekt = trajek.loc[:,:"ws"]
+          # create data frame with trajectory starting point, values around every dt seconds and last calculated position (or last position before trajectory was cut 
+          # because of wind speed)
+          test = pd.DataFrame(trajekt.loc[trajekt.index==0])
+          if Startzeit[i] < Endzeit[i]:
+            for dti in range(dt+int(test.loc[0,"Zeit"]),int(test.loc[0,"Zeit"])+int(max(trajekt.dt)),dt):
+              test = pd.concat([test, trajekt.loc[np.argsort(np.argsort(round(abs(trajekt['Zeit']-dti))))==0]])
+          else:
+            for dti in range(int(test.loc[0,"Zeit"])-dt,int(test.loc[0,"Zeit"])-int(max(trajekt.dt)),-dt):
+              test = pd.concat([test, trajekt.loc[np.argsort(np.argsort(round(abs(trajekt['Zeit']-dti))))==0]])
+          test = pd.concat([test,  trajekt.loc[trajekt.index==max(trajekt.index)]], ignore_index=True)
+          test = test.drop_duplicates()                # if there are duplicate rows the duplicate is dropped.
+          
+          # spatial join of warm target areas with every output position, if wanted
+          if "Ueberwaermungsgebiete" in in_nml["input"]:
+            for q in range(len(test)):
+              geometry = [Point(test.loc[q,"x"]+xlu, test.loc[q,"y"]+ylu)]
+              stbz = gpd.GeoDataFrame(geometry=geometry, crs=in_nml["input"]["koord_system"])
+              bezirk = gpd.sjoin(umriss, stbz, "inner", "contains")
+              if len(bezirk[name_warm].values) > 0:        
+                  test.loc[q,"Überwärmungsgebiet"] = bezirk[name_warm].values[0]
+              else:
+                  test.loc[q,"Überwärmungsgebiet"] = "ob"
+          else: 
+            test["Überwärmungsgebiet"] = "nc"
+          
+          # spatial join of cold air production areas with temporally first position of trajectory (written for every output position)
+          if "Quellgebiete" in in_nml["input"]:
+            geometry = [Point(test.loc[test.Zeit==min(test.Zeit),"x"]+xlu, test.loc[test.Zeit==min(test.Zeit),"y"]+ylu)]
+            quell = gpd.GeoDataFrame(geometry=geometry, crs=in_nml["input"]["koord_system"])
+            gebiet = gpd.sjoin(quellgebiet, quell, "right", "contains")
+            if len(gebiet[name_quell].values) > 0:
+              test["Quellgebiet"] = gebiet[name_quell].values[0]
+            else:
+              test["Quellgebiet"] = "ob"
+          else:
+            test["Quellgebiet"] = "nc"
+          line = list(zip(round(test.x+xlu,2), round(test.y+ylu,2)))
+          geom.append(LineString(line))
+          lines_df.loc[i,"Nr":] = [i+1, test.x[0], test.y[0], test.Zeit[0], round(test.Zeit[max(test.index)],2), test.Überwärmungsgebiet[0], test.Quellgebiet[0]] #
+          test["Nr"] = i+1
+          points_df = pd.concat([points_df,test], ignore_index=True)
+        lines_gdf = gpd.GeoDataFrame(lines_df, crs=in_nml["input"]["koord_system"], geometry = geom)
+        # with open(directory+in_nml["output"]["out_dir"]+out_file+str(start_ein)+"_"+str(end_ein)+"_LU"+str(lu_start)+"_LS.geojson", "w") as file:
+        #   file.write(lines_gdf.to_json())                                     # alternative for saving
+        lines_gdf.to_file(out_file_name+"_LS.geojson")                          # save trajectories as Linestrings
+        points_df["x"] = points_df.x+xlu        # convert to absolute coordinates
+        points_df["y"] = points_df.y+ylu        # convert to absolute coordinates
+        points_df["u"] = points_df.u/100        # convert to m s⁻¹
+        points_df["v"] = points_df.v/100        # convert to m s⁻¹
+        points_df["ex"] = points_df.ex/10       # convert to kJ/m
+        points_df["hx"] = points_df.hx/10       # convert to m
+        points_df["geometry"] = points_df[["x", "y"]].apply(Point, axis=1)
+        points_df.loc[:,["Quellgebiet","Überwärmungsgebiet"]] = points_df.loc[:,["Quellgebiet","Überwärmungsgebiet"]].fillna("ob")
+        points_df.fillna(-99.99, inplace=True)
+        points_df = points_df.round(2)          # round to 2 decimal points
+        points_gdf = gpd.GeoDataFrame(points_df[["Nr", "x", "y", "Zeit","u", "v","ws", "ex", "hx", "Zeitschritt", "LU", "Überwärmungsgebiet", "Quellgebiet", "geometry"]], crs=in_nml["input"]["koord_system"], geometry="geometry")
+        points_gdf.to_file(out_file_name+"_P.geojson")                                                                                                # save as Points
+        # with open(directory+in_nml["output"]["out_dir"]+out_file+str(start_ein)+"_"+str(end_ein)+"_LU"+str(lu_start)+"_P.geojson", "w") as file:    # alternative way
+        #   file.write(points_gdf.to_json())                                                                                                          # to save as geojson
+        print("Trajectories saved as geoJSON LineStrings and Points.")
+  
+      print("Saving took so long: ", datetime.now()-now)
 
 print("total duration: ",datetime.now()-now1)
