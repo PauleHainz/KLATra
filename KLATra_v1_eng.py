@@ -252,6 +252,15 @@ if in_nml["trajektorien"]["art"] in ['Landuse', 'Landuse_Bereich', 'Landuse_Poly
   else: 
     print("For landuse based calculation of starting points a geoJSON file of polygonized landuse data is needed.  \nProgram exits now.")
     exit()
+  if len(in_nml["trajektorien"]["landuse"]) > 1:
+    if len(traj_dichte) == 1:
+      print("There is only one trajectory starting density. It will be used for all landuse classes.")
+      traj_dichte = traj_dichte * len(in_nml["trajektorien"]["landuse"])
+    elif len(traj_dichte) != len(in_nml["trajektorien"]["landuse"]):
+      print("""The number of land use classes and trajectory starting densities is not the same. 
+      Please correct that or write only one starting density which will then be used for all landuse classes. \n
+      Program exits now.""")
+      exit()
 
 # if target and source areas are wanted for a spatial join, those files are read
 if "Ueberwaermungsgebiete" in in_nml["input"]:
@@ -261,7 +270,7 @@ if "Quellgebiete" in in_nml["input"]:
   quellgebiet = gpd.read_file(quelle)
   name_quell = in_nml["input"]["name_quell"]
 
-# Loop over atrt and ending times for trajectory calculation
+# Loop over start and ending times for trajectory calculation
 for end_ind in range(0, len(end_ein_list)):
   end_ein = [end_ein_list[end_ind]]
   start_ein = [start_ein_list[end_ind]]
