@@ -832,7 +832,7 @@ for end_ind in range(0, len(end_ein_list)):
               test["Quellgebiet"] = "nc"
             line = list(zip(round(test.x+xlu,2), round(test.y+ylu,2)))
             geom.append(LineString(line))
-            lines_df.loc[i,"Nr":] = [i+1, test.x[0], test.y[0], test.Zeit[0], round(test.Zeit[max(test.index)],2), test.Überwärmungsgebiet[0], test.Quellgebiet[0]] #
+            lines_df.loc[i,"Nr":] = [i+1, test.x[0], test.y[0], test.Zeit[0], round(test.Zeit[max(test.index)],2), test.Überwärmungsgebiet[-1], test.Quellgebiet[0]] #
             test["Nr"] = i+1
             points_df = pd.concat([points_df,test], ignore_index=True)
           lines_gdf = gpd.GeoDataFrame(lines_df, crs=in_nml["input"]["koord_system"], geometry = geom)
@@ -1453,7 +1453,7 @@ for end_ind in range(0, len(end_ein_list)):
             test["Quellgebiet"] = "nc"
           line = list(zip(round(test.x+xlu,2), round(test.y+ylu,2)))
           geom.append(LineString(line))
-          lines_df.loc[i,"Nr":] = [i+1, test.x[0], test.y[0], test.Zeit[0], round(test.Zeit[max(test.index)],2), test.Überwärmungsgebiet[0], test.Quellgebiet[0]] #
+          lines_df.loc[i,"Nr":] = [i+1, test.x[0], test.y[0], test.Zeit[0], round(test.Zeit[max(test.index)],2), test.Überwärmungsgebiet[-1], test.Quellgebiet[0]] #
           test["Nr"] = i+1
           points_df = pd.concat([points_df,test], ignore_index=True)
         lines_gdf = gpd.GeoDataFrame(lines_df, crs=in_nml["input"]["koord_system"], geometry = geom)
