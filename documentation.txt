@@ -2,7 +2,7 @@ This is a documentation for KLATra_v1.py.
 
 Statement keine Haftung?
 
-KLATra needs as input a FORTRAN namelist like the example namelist KLATra_in.in.
+KLATra needs as input a FORTRAN namelist like the example namelist KLATra_in_eng.in.
 Inside this namelist all needed information can be passed to the software.
 
 You can run KLATra in your command line like this:
