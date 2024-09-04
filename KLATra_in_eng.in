@@ -1,0 +1,70 @@
+! write directories ending with "/" and files not starting with "/"
+! all files and directories are interpreted relative to directory
+! If there is a standard value, it is given in this file;
+! if there is none, ! nsv (no standard value) is written and an exmaple given
+!
+
+&input
+    directory = '/home/paule/Dokumente/Uni/BA/Paula/KLAM_21/Freiburg-0/' ! nsv      ! directory, relative to which
+                                                 ! files and directories are specified in in_file
+                                                 ! (string ending with "/")
+    in_file = 'input/Freiburg.in'     ! nsv      ! KLAM_21 namelist of simulation, for which trajectories
+                                                 ! shall be calculated (string not starting with "/"
+    koord_system = 'EPSG:25832'       ! nsv      ! EPSG-Code of coordinate system;
+                                                 ! to be written in the output header and used for correct
+                                                 ! placement with GeoJSON (string)
+    POTCAIR = "Freiburg_Stadtteile.geojson"      ! GeoJSON-file with POTCAIR as polygons;
+                                                 ! located in directory or give complete path
+    name_POTCAIR = name                          ! attribute in POTCAIR which shall be used for identification of POTCAIRs in output
+    CAFA =  "Quellgebiete.geojson"               ! GeoJSON-file with CAFA as polygons;
+                                                 ! located in directory or give complete path
+    name_CAFA = QG_kurz                          ! attribute in CAFA which shall be used for identification of CAFAs in output
+/
+
+&trajectories
+    mode = 'landuse_polygon'                  ! nsv      ! one of: 'rectangle', 'rectangle_border', 'rectangle_r',
+                                                 ! 'landuse', 'landuse_area', 'landuse_poly', 'polygon', 'single'
+    x_koord =
+420595.352498161,420589.454499546,420577.074499546,420468.877191941,406115.247191941,406057.77300422,405978.82300422,405941.35308022,405862.42308022,405849.200400623,405767.700400623,405759.530811493,405677.560811493,405661.785044546,405578.855044546,405557.913661925,405470.313661925,405424.343127619,405325.643127619,405272.397159866,405154.197159866,405124.553006342,404518.003006342,404508.028867203,404401.118867203,404379.724687272,401084.734687272,401010.951678822,400928.631678822,400928.244950396,400707.884950396,400712.912087071,400756.572332265,400775.882332265,400848.19152906,403341.99152906,403364.827255501,403379.487255501,403526.606625232,403550.536625232,403570.34123531,403596.88123531,403603.603060204,410545.213060204,410739.275476925,411289.295476925,411403.569599755,430513.319599755,430675.859656551,430800.795146962,430800.915146962,430868.145669723,431230.165669723,431240.616959028,431781.036959028,431782.661482981,431741.32314849,431660.607459554,425785.477459554,425776.17657801,425729.68657801,425682.727027404,425644.137027404,425607.743344212,424934.693344212,424840.865579925,422340.425579925,422338.369056295,422291.439056295,422190.67617944,420681.33617944,420620.063829953,420619.623829953,420613.859422849,420612.679422849,420600.022498161,420595.352498161
+                        ! nsv      ! single value or comma separated
+    y_koord =
+5304124.87834013,5304124.86260985,5304124.90260985,5304137.10788528,5307368.42788528,5307385.03525805,5307413.06525805,5307428.09804746,5307463.52804746,5307469.69678447,5307509.17678447,5307513.22665909,5307554.79665909,5307563.1545026,5307609.0045026,5307621.25507914,5307675.39507914,5307707.50277472,5307785.02277472,5307833.42698273,5307957.54698273,5307991.63510167,5308756.30510167,5308769.3116769,5308913.5616769,5308944.83984472,5314177.13984472,5314387.79528934,5315121.02528934,5315124.58481027,5317222.75481027,5317362.74011096,5317495.83759215,5317535.05759215,5317643.47501845,5320493.18501845,5320517.58399553,5320532.23399553,5320634.01009759,5320644.85009759,5320653.3121476,5320663.9821476,5320666.62830962,5323341.55830962,5323374.79616921,5323359.08616921,5323342.48250864,5318258.48250864,5318181.82021025,5318052.64009842,5318052.46009842,5317903.42195455,5316539.96195455,5316490.72868618,5313116.75868618,5312969.51313145,5312828.18006892,5312705.01810229,5306112.57810229,5306102.42656581,5306053.06656581,5306009.22743718,5305977.58743718,5305950.41571521,5305494.00571521,5305444.03326508,5304436.97326508,5304436.15028337,5304417.49028337,5304389.21244342,5304132.06244342,5304125.47572987,5304125.45572987,5304125.22702643,5304125.18702643,5304124.91834013,5304124.87834013
+                        ! nsv      ! single value or comma separated
+    start =   16400                    ! nsv      ! single value or comma separated
+    end =     8200                       ! nsv      ! single value or comma separated
+    windfield = 'q'                                 ! 'q' for mean wind field, 'z' for own chosen height
+                                                    ! used to find the right KLAM_21 output files
+    traj_start_dens = 0.01 !, 0.0005 !,0.0003,     ! nsv    ! single value or comma separated
+                                                   ! if no value is given one per cell
+                                                   ! (not used for modes 'single' and 'rectangle_border')
+    landuse = 12                   ! nsv    ! landuse classes named like in KLAM_21
+                                                   ! (for modes 'landuse', 'landuse_poly' and 'landuse_area')
+    timestep = 1                                   ! timestep used for calculation if ts = 'fixed'; standard = 1
+    ts = 'klam'                                    ! timestep mode: 'klam' or 'fixed'
+    lu_file = "input/testout.geojson"              ! vectorized landusefile (GeoJSON),
+                                                   ! needed for modes 'landuse', 'landuse_poly' and 'landuse_area'
+    !windspeed_treshold = 0                        ! standard = 0.2 m s⁻¹; if 0, no trajectories will be cut off
+    treshold = 300                                 ! standard = 5 timesteps
+/
+
+&output
+    format = 'KLAM', 'geojson'              ! 'KLAM' and/or 'geojson'(string, comma separated strings)
+    dt = 300                                ! How often should trajectorie position be saved? (in seconds)
+    out_dir = 'KLATra/test/'    ! nsv            ! In which directory should output be written? (relative to directory)
+                                            ! (string ending with "/" and not starting with "/")
+    out_file = 'KLATRAout_2c_'              ! name of output files (string not beginning with "/"),
+                                            ! should end in "_" or a similar character; complete file name will be
+                                            ! generated adding [start]_[end](_LU[LU]) at the end.
+    out_ext = '.out'                        ! (if 'KLAM') extension of output files
+    colorgradient = .true.                  ! (if 'KLAM') Do you want a color gradient indicating time?
+                                            ! (.true. or .false.)
+    linewidth = 0.5                         ! (if 'KLAM') linewidth for KLAM_21 compatible output, standard: 0.5
+    linetype = 0                            ! (if 'KLAM') linetype for KLAM_21 compatible output, standard: 0
+    color = 180, 170                        ! (if 'KLAM') colors for displaying trajectories in KLAM_21
+                                            ! standard: 180(-189) (blue) for forwards-
+                                            ! and 170(-179) (red) for backwardstrajectories
+                                            ! (multiple colors only if colorgradient = .true.)
+                                            ! (see KLAM_21 colortable)
+/
+
+! 'rectangle', 'landuse_area', 'rectangle_border': give only two diagonal coordinates in x_koord and y_koord.
