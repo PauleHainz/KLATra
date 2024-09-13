@@ -879,7 +879,7 @@ for end_ind in range(0, len(end_in_list)):
         else: 
           n = m.ceil(PolyArea(x_input, y_input)/10000*traj_dens[0])
           points_inside = [all_points[i] for i in np.where(poly.contains_points(all_points, radius=-0.5))[0]]
-          rng = default_rng(seed=51)                # seed setzen, um immer gleiche Punkte zufällig zu erhalten (bei gleichem Eingabezeugs)    
+          rng = default_rng(seed=51)                # set seed to get same random starting points for same parameters (same starting density)     
           ind = list(rng.choice(len(points_inside), size=n, replace=False))
           x1 = x1+[points_inside[xi][0]-xlu for xi in ind]; y1 = y1+[points_inside[xi][1]-ylu for xi in ind]
 
@@ -891,12 +891,12 @@ for end_ind in range(0, len(end_in_list)):
       
     
     ##### Einzelkoordinaten
-    elif in_nml["trajectories"]["mode"] == 'Einzel':
+    elif in_nml["trajectories"]["mode"] == 'single':
       x1 = [xk-xlu for xk in in_nml["trajectories"]["x_koord"]]                                         
       y1 = [yk-ylu for yk in in_nml["trajectories"]["y_koord"]]
 
       
-    ##### rectangle (gefüllt)
+    ##### rectangle 
     elif in_nml["trajectories"]["mode"] == "rectangle":
       x_input = in_nml["trajectories"]["x_koord"]
       y_input = in_nml["trajectories"]["y_koord"]
@@ -907,28 +907,13 @@ for end_ind in range(0, len(end_in_list)):
       if traj_dens != None:
         x1 = []; y1 = []
         n = m.ceil(abs((x_input[0]-x_input[1])*(y_input[0]-y_input[1]))/10000*traj_dens)
-        rng = default_rng(seed=51)                # seed setzen, um immer gleiche Punkte zufällig zu erhalten (bei gleichem Eingabezeugs)    
+        rng = default_rng(seed=51)                # set seed to get same random starting points for same parameters (same starting density)      
         ind = list(rng.choice(len(koord), size=n, replace=False))
         x1 = x1+[koord[xi][0]-xlu for xi in ind]; y1 = y1+[koord[xi][1]-ylu for xi in ind]
 
       else:
         x1 = [k[0]-xlu for k in koord]; y1 = [k[1]-ylu for k in koord]
   
-    #### rectangle (randomly filled)
-    elif in_nml["trajectories"]["mode"] == "rectangle_r":
-      x_input = in_nml["trajectories"]["x_koord"]
-      y_input = in_nml["trajectories"]["y_koord"]
-      if traj_dens != None:
-        n = m.ceil(abs((x_input[0]-x_input[1])*(y_input[0]-y_input[1]))/10000*traj_dens)
-        rng = default_rng(seed=51)                # seed setzen, um immer gleiche Punkte zufällig zu erhalten (bei gleichem Eingabezeugs)    
-        x1 = list(rng.integers(min(x_input)-xlu,max(x_input)-xlu, size=n))
-        rng = default_rng(seed=51)                # seed setzen, um immer gleiche Punkte zufällig zu erhalten (bei gleichem Eingabezeugs)    
-        y1 = list(rng.integers(min(y_input)-ylu,max(y_input)-ylu, size=n))
-
-      else:
-        print("Please add traj_start_dens in the input file or change art to='rectangle' instead of 'rectangle_r'.")
-        print("Program exits now.")
-        exit()
     
     ###### rectangle_border
     elif in_nml["trajectories"]["mode"] == "rectangle_border":
@@ -941,7 +926,7 @@ for end_ind in range(0, len(end_in_list)):
 
         
     else:
-      print("No valid value in art in the input file. Program exits now.")
+      print("No valid value in mode in the input file. Program exits now.")
       exit()
       
        

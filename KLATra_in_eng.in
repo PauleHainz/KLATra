@@ -1,7 +1,7 @@
 ! write directories ending with "/" and files not starting with "/"
 ! all files and directories are interpreted relative to directory
 ! If there is a standard value, it is given in this file;
-! if there is none, ! nsv (no standard value) is written and an exmaple given
+! if there is none, ! nsv (no standard value) is written and an example given
 !
 
 &input
@@ -13,17 +13,17 @@
     koord_system = 'EPSG:25832'       ! nsv      ! EPSG-Code of coordinate system;
                                                  ! to be written in the output header and used for correct
                                                  ! placement with GeoJSON (string)
-    POTCAIR = "Freiburg_Stadtteile.geojson"      ! GeoJSON-file with POTCAIR as polygons;
+    POTCAIR = "Freiburg_Stadtteile.geojson" ! nsv  ! GeoJSON-file with POTCAIR as polygons;
                                                  ! located in directory or give complete path
-    name_POTCAIR = name                          ! attribute in POTCAIR which shall be used for identification of POTCAIRs in output
-    CAFA =  "Quellgebiete.geojson"               ! GeoJSON-file with CAFA as polygons;
+    name_POTCAIR = name                 ! nsv     ! attribute in POTCAIR which shall be used for identification of POTCAIRs in output
+    CAFA =  "Quellgebiete.geojson"      ! nsv      ! GeoJSON-file with CAFA as polygons;
                                                  ! located in directory or give complete path
-    name_CAFA = QG_kurz                          ! attribute in CAFA which shall be used for identification of CAFAs in output
+    name_CAFA = QG_kurz                ! nsv      ! attribute in CAFA which shall be used for identification of CAFAs in output
 /
 
 &trajectories
-    mode = 'landuse_polygon'                  ! nsv      ! one of: 'rectangle', 'rectangle_border', 'rectangle_r',
-                                                 ! 'landuse', 'landuse_area', 'landuse_poly', 'polygon', 'single'
+    mode = 'landuse_poly'                  ! nsv      ! one of: 'rectangle', 'rectangle_border', 'single',
+                                                 ! 'landuse', 'landuse_area', 'landuse_poly', 'polygon'
     x_koord =
 420595.352498161,420589.454499546,420577.074499546,420468.877191941,406115.247191941,406057.77300422,405978.82300422,405941.35308022,405862.42308022,405849.200400623,405767.700400623,405759.530811493,405677.560811493,405661.785044546,405578.855044546,405557.913661925,405470.313661925,405424.343127619,405325.643127619,405272.397159866,405154.197159866,405124.553006342,404518.003006342,404508.028867203,404401.118867203,404379.724687272,401084.734687272,401010.951678822,400928.631678822,400928.244950396,400707.884950396,400712.912087071,400756.572332265,400775.882332265,400848.19152906,403341.99152906,403364.827255501,403379.487255501,403526.606625232,403550.536625232,403570.34123531,403596.88123531,403603.603060204,410545.213060204,410739.275476925,411289.295476925,411403.569599755,430513.319599755,430675.859656551,430800.795146962,430800.915146962,430868.145669723,431230.165669723,431240.616959028,431781.036959028,431782.661482981,431741.32314849,431660.607459554,425785.477459554,425776.17657801,425729.68657801,425682.727027404,425644.137027404,425607.743344212,424934.693344212,424840.865579925,422340.425579925,422338.369056295,422291.439056295,422190.67617944,420681.33617944,420620.063829953,420619.623829953,420613.859422849,420612.679422849,420600.022498161,420595.352498161
                         ! nsv      ! single value or comma separated
@@ -34,33 +34,35 @@
     end =     8200                       ! nsv      ! single value or comma separated
     windfield = 'q'                                 ! 'q' for mean wind field, 'z' for own chosen height
                                                     ! used to find the right KLAM_21 output files
-    traj_start_dens = 0.01 !, 0.0005 !,0.0003,     ! nsv    ! single value or comma separated
-                                                   ! if no value is given one per cell
+    traj_start_dens = 0.01                         ! single value or comma separated
+                                                   ! standard: one per cell
                                                    ! (not used for modes 'single' and 'rectangle_border')
     landuse = 12                   ! nsv    ! landuse classes named like in KLAM_21
                                                    ! (for modes 'landuse', 'landuse_poly' and 'landuse_area')
     timestep = 1                                   ! timestep used for calculation if ts = 'fixed'; standard = 1
-    ts = 'klam'                                    ! timestep mode: 'klam' or 'fixed'
-    lu_file = "input/testout.geojson"              ! vectorized landusefile (GeoJSON),
+    ts = 'klam'                        ! nsv       ! timestep mode: 'klam' or 'fixed'
+    lu_file = "input/testout.geojson"  ! nsv       ! vectorized landusefile (GeoJSON),
                                                    ! needed for modes 'landuse', 'landuse_poly' and 'landuse_area'
     !windspeed_treshold = 0                        ! standard = 0.2 m s⁻¹; if 0, no trajectories will be cut off
     treshold = 300                                 ! standard = 5 timesteps
 /
 
 &output
-    format = 'KLAM', 'geojson'              ! 'KLAM' and/or 'geojson'(string, comma separated strings)
+    format = 'KLAM', 'geojson'              ! 'KLAM' and/or 'geojson'(string, comma separated strings); standard: 'KLAM'
     dt = 300                                ! How often should trajectorie position be saved? (in seconds)
+                                            ! standard: 300
     out_dir = 'KLATra/test/'    ! nsv            ! In which directory should output be written? (relative to directory)
                                             ! (string ending with "/" and not starting with "/")
     out_file = 'KLATRAout_2c_'              ! name of output files (string not beginning with "/"),
                                             ! should end in "_" or a similar character; complete file name will be
                                             ! generated adding [start]_[end](_LU[LU]) at the end.
-    out_ext = '.out'                        ! (if 'KLAM') extension of output files
+                                            ! standard: 'KLATRAout_'
+    out_ext = '.out'                        ! (if 'KLAM') extension of output files; standard: '.out'
     colorgradient = .true.                  ! (if 'KLAM') Do you want a color gradient indicating time?
-                                            ! (.true. or .false.)
-    linewidth = 0.5                         ! (if 'KLAM') linewidth for KLAM_21 compatible output, standard: 0.5
-    linetype = 0                            ! (if 'KLAM') linetype for KLAM_21 compatible output, standard: 0
-    color = 180, 170                        ! (if 'KLAM') colors for displaying trajectories in KLAM_21
+                                            ! (.true. or .false.); standard: .true.
+    linewidth = 0.5                         ! (if 'KLAM') linewidth for KLAM_21 compatible output; standard: 0.5
+    linetype = 0                            ! (if 'KLAM') linetype for KLAM_21 compatible output; standard: 0
+    color = 180, 170                        ! (if 'KLAM') colors for displaying trajectories in KLAM_21;
                                             ! standard: 180(-189) (blue) for forwards-
                                             ! and 170(-179) (red) for backwardstrajectories
                                             ! (multiple colors only if colorgradient = .true.)
