@@ -9,5 +9,7 @@ An example input file (KLATra_in_eng.in) for the script is given with some infor
 More information can be found in KLATra_documentation.pdf.
 
 To run the script, write 
+
   python KLATRa_v1.1_eng.py -f namelist.in
+  
 in your command line. 
