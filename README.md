@@ -1,5 +1,7 @@
 # KLATra
 
+KLATra is a python script to calculate trajectories from KLAM_21 output.
+
 You can download the KLATra script here (KLATra_v1.1_eng.py).
 In case there should be new versions, it has a version number.
 The KLATra_package_versions.txt file lists the package versions with which the script was created.
